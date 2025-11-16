@@ -32,4 +32,13 @@ export default defineConfig({
       { find: /^@pkg\/(.*)$/, replacement: fileURLToPath(new URL('../../packages/$1', import.meta.url)) },
     ],
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 })

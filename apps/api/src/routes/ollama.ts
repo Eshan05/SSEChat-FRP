@@ -1,0 +1,211 @@
+import { type FastifyBaseLogger, type FastifyReply, FastifyPluginAsync } from 'fastify';
+import axios, { type AxiosError } from 'axios';
+import type { Readable } from 'node:stream';
+
+import { ChatRequest } from '@pkg/zod';
+
+const OLLAMA_BASE = 'http://127.0.0.1:11434';
+
+type SSEEvent = string | { data: string; event?: string; id?: string };
+
+const ollamaRoutes: FastifyPluginAsync = async (fastify) => {
+  // Ensure CORS headers are set early for all plugin routes (helps with streaming)
+  fastify.addHook('onRequest', (request, reply, done) => {
+    const origin = (request.headers.origin as string | undefined) ?? '*';
+    reply
+      .header('Access-Control-Allow-Origin', origin)
+      .header('Vary', 'Origin')
+      .header('Access-Control-Allow-Credentials', 'true')
+      .header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+      .header('Access-Control-Allow-Headers', 'Content-Type, Accept');
+    done();
+  });
+  fastify.get('/models', async (_request, reply) => {
+    try {
+      const response = await axios.get(`${OLLAMA_BASE}/api/tags`);
+      return { models: response.data.models ?? [] };
+    } catch (error) {
+      fastify.log.error({ error }, 'Failed to fetch Ollama models');
+      return reply.code(500).send({ error: 'Failed to fetch models' });
+    }
+  });
+
+  fastify.post('/chat', async (request, reply) => {
+    const parseResult = ChatRequest.safeParse(request.body);
+
+    if (!parseResult.success) {
+      return reply.code(400).send({ error: parseResult.error.flatten() });
+    }
+
+    const { model, messages } = parseResult.data;
+    const upstreamAbort = new AbortController();
+    const requestOrigin = request.headers.origin;
+    fastify.log.debug({ origin: requestOrigin }, 'Incoming chat request Origin');
+
+    const eventSourceFactory = () =>
+      (async function* (): AsyncGenerator<SSEEvent> {
+        let upstream: Readable | null = null;
+        const clientSocket = reply.raw;
+        const handleClientClose = () => {
+          upstream?.destroy();
+          upstreamAbort.abort();
+        };
+
+        clientSocket.on('close', handleClientClose);
+
+        try {
+          const response = await axios({
+            method: 'POST',
+            url: `${OLLAMA_BASE}/api/chat`,
+            data: { model, messages, stream: true },
+            responseType: 'stream',
+            signal: upstreamAbort.signal,
+          });
+
+          upstream = response.data as Readable;
+          let buffer = '';
+
+          for await (const chunk of upstream) {
+            buffer += chunk.toString();
+
+            let newlineIndex = buffer.indexOf('\n');
+            while (newlineIndex !== -1) {
+              const line = buffer.slice(0, newlineIndex).trim();
+              buffer = buffer.slice(newlineIndex + 1);
+
+              if (line.length > 0) {
+                yield* parseOllamaLine(line, fastify.log);
+              }
+
+              newlineIndex = buffer.indexOf('\n');
+            }
+          }
+
+          if (buffer.trim().length > 0) {
+            yield* parseOllamaLine(buffer.trim(), fastify.log);
+          }
+        } catch (error) {
+          if ((error as Error).name !== 'AbortError') {
+            const formattedError = formatOllamaError(error);
+            fastify.log.error(
+              { error: formattedError, details: extractAxiosMeta(error) },
+              'Ollama stream failed',
+            );
+            yield { data: JSON.stringify({ error: formattedError }) } satisfies SSEEvent;
+          }
+        } finally {
+          clientSocket.off('close', handleClientClose);
+          upstream?.destroy();
+        }
+      })();
+
+    return sendEventStream(reply, eventSourceFactory, requestOrigin);
+  });
+};
+
+async function sendEventStream(
+  reply: FastifyReply,
+  sourceFactory: () => AsyncGenerator<SSEEvent>,
+  corsOrigin?: string,
+) {
+  const enhancedReply = reply as FastifyReply & {
+    sse?: (source: AsyncIterable<SSEEvent>) => FastifyReply;
+  };
+
+  if (corsOrigin) {
+    reply.header('Access-Control-Allow-Origin', corsOrigin).header('Vary', 'Origin');
+  } else {
+    reply.header('Access-Control-Allow-Origin', '*');
+  }
+  reply
+    .header('Access-Control-Allow-Credentials', 'true')
+    .header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    .header('Access-Control-Allow-Headers', 'Content-Type, Accept');
+
+  // Do not use enhancedReply.sse() — always stream manually to control headers.
+
+  reply
+    .header('Content-Type', 'text/event-stream')
+    .header('Cache-Control', 'no-cache')
+    .header('Connection', 'keep-alive')
+    .code(200);
+  reply.raw.flushHeaders?.();
+  // Log what header was set for debugging
+  try {
+    fastifyLogFromReply(reply, 'Access-Control-Allow-Origin');
+  } catch {}
+
+  for await (const event of sourceFactory()) {
+    const payload = typeof event === 'string' ? event : event.data;
+    reply.raw.write(`data: ${payload}\n\n`);
+  }
+
+  reply.raw.end();
+  return reply;
+}
+
+function* parseOllamaLine(line: string, logger: FastifyBaseLogger) {
+  try {
+    const parsed = JSON.parse(line);
+
+    if (parsed.message?.content) {
+      yield { data: JSON.stringify({ content: parsed.message.content }) } satisfies SSEEvent;
+    }
+
+    if (parsed.done) {
+      yield { data: '[DONE]' } satisfies SSEEvent;
+    }
+  } catch (error) {
+    logger.warn({ error, line }, 'Unable to parse Ollama chunk');
+  }
+}
+
+function formatOllamaError(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    if (error.response?.data) {
+      if (typeof error.response.data === 'string') {
+        return error.response.data;
+      }
+
+      try {
+        return JSON.stringify(error.response.data);
+      } catch {
+        return 'Upstream returned non-serializable payload.';
+      }
+    }
+
+    if (error.code) {
+      return `Ollama request failed (${error.code})`;
+    }
+  }
+
+  return error instanceof Error ? error.message : 'Failed to connect to Ollama';
+}
+
+function extractAxiosMeta(error: unknown) {
+  if (!axios.isAxiosError(error)) return undefined;
+
+  const meta = {
+    status: error.response?.status,
+    statusText: error.response?.statusText,
+    code: error.code,
+    url: error.config?.url,
+    method: error.config?.method,
+  };
+
+  return meta;
+}
+
+export default ollamaRoutes;
+
+// helper to log the headers set on the reply when debugging
+function fastifyLogFromReply(reply: FastifyReply, headerName: string) {
+  try {
+    // @ts-ignore
+    const header = reply.getHeader?.(headerName) ?? (reply as any).getHeaders?.()[headerName];
+    // eslint-disable-next-line no-console
+    console.debug('Reply header set:', headerName, header);
+  } catch (e) {
+    // ignore
+  }
+}

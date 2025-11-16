@@ -1,0 +1,25 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "description": "",
+  "private": true,
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "tsx watch index.ts",
+    "start": "tsx index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@pkg/types": "workspace:*",
+    "@pkg/zod": "workspace:*",
+    "fastify": "^5.6.2",
+    "fastify-sse-v2": "^4.2.1"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.1.2",
+    "tsx": "catalog:",
+    "typescript": "catalog:"
+  }
+}
