@@ -4,11 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "build": "pnpm --recursive build",
+    "clean": "pnpm --recursive exec rm -rf node_modules dist"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
   "packageManager": "pnpm@10.18.0",
   "devDependencies": {
     "tsx": "^4.20.6",
