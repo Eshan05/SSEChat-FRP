@@ -133,7 +133,7 @@ async function sendEventStream(
   // Log what header was set for debugging
   try {
     fastifyLogFromReply(reply, 'Access-Control-Allow-Origin');
-  } catch {}
+  } catch { }
 
   for await (const event of sourceFactory()) {
     const payload = typeof event === 'string' ? event : event.data;
