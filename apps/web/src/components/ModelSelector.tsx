@@ -2,8 +2,6 @@ import { useEffect } from 'react'
 import { RotateCw } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { OllamaModel } from '@pkg/zod'
-
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -14,36 +12,37 @@ import {
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { API_BASE_URL, DEFAULT_MODEL } from '@/lib/api'
+import { DEFAULT_MODEL } from '@/lib/api'
+import { fetchModelInfo, fetchModels } from '@/lib/ollama'
 import { useSelectedModel } from '@/components/SelectedModelProvider'
 
-async function fetchModels(): Promise<OllamaModel[]> {
-  const res = await fetch(`${API_BASE_URL}/models`)
-  if (!res.ok) throw new Error('Failed to fetch models')
-  const payload = await res.json()
-  // The API returns { models: Array<...> } where each model may have a name property
-  const models = (payload?.models ?? []) as OllamaModel[]
-  return models
-}
+const numberFormatter = new Intl.NumberFormat()
 
 export default function ModelSelector({ className }: { className?: string }) {
   const { model, setModel } = useSelectedModel()
   const queryClient = useQueryClient()
-  const { data, isLoading, error, isFetching } = useQuery({
+  const modelsQuery = useQuery({
     queryKey: ['models'],
     queryFn: fetchModels,
     staleTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
   })
+  const infoQuery = useQuery({
+    queryKey: ['model-info', model],
+    queryFn: () => fetchModelInfo(model),
+    staleTime: 1000 * 60 * 10,
+    enabled: Boolean(model),
+    refetchOnWindowFocus: false,
+  })
 
   useEffect(() => {
-    if (isLoading || !data?.length) {
+    if (modelsQuery.isLoading || !modelsQuery.data?.length) {
       return
     }
 
-    const modelNames = data.map((candidate) => candidate.name)
+    const modelNames = modelsQuery.data.map((candidate) => candidate.name)
     if (!modelNames.includes(model)) {
-      setModel(data[0].name)
+      setModel(modelsQuery?.data[0]!.name)
       return
     }
 
@@ -55,19 +54,19 @@ export default function ModelSelector({ className }: { className?: string }) {
     }
 
     if (!storedModel && !modelNames.includes(DEFAULT_MODEL)) {
-      setModel(data[0].name)
+      setModel(modelsQuery.data[0]!.name)
     }
-  }, [data, isLoading, model, setModel])
+  }, [modelsQuery.data, modelsQuery.isLoading, model, setModel])
 
-  if (isLoading) {
+  if (modelsQuery.isLoading) {
     return (
       <div className={cn('text-sm text-muted-foreground', className)}>
-        Loading models…
+        Loading models...
       </div>
     )
   }
 
-  if (error) {
+  if (modelsQuery.error) {
     return (
       <div className={cn('text-sm text-destructive', className)}>
         Failed to load models
@@ -75,8 +74,13 @@ export default function ModelSelector({ className }: { className?: string }) {
     )
   }
 
-  const models = data ?? []
+  const models = modelsQuery.data ?? []
   const current = models.find((m) => m.name === model)
+  const modelInfo = infoQuery.data
+  const capabilities = modelInfo?.capabilities ?? []
+  const parameterSummary = modelInfo?.parameters
+    ? formatParameterSummary(modelInfo.parameters)
+    : 'N/A'
 
   return (
     <div className={cn('flex w-full flex-col gap-2', className)}>
@@ -106,41 +110,60 @@ export default function ModelSelector({ className }: { className?: string }) {
               variant="outline"
               size="icon-sm"
               aria-label="Refresh models"
-              onClick={() => queryClient.invalidateQueries({ queryKey: ['models'] })}
-              disabled={isFetching}
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey: ['models'] })
+                if (model) {
+                  queryClient.invalidateQueries({ queryKey: ['model-info', model] })
+                }
+              }}
+              disabled={modelsQuery.isFetching}
             >
-              <RotateCw className={cn('size-4', isFetching && 'animate-spin')} />
+              <RotateCw
+                className={cn(
+                  'size-4',
+                  (modelsQuery.isFetching || infoQuery.isFetching) && 'animate-spin',
+                )}
+              />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Refresh models</TooltipContent>
         </Tooltip>
 
-        {isFetching && (
-          <span className="text-xs text-muted-foreground">Refreshing…</span>
+        {(modelsQuery.isFetching || infoQuery.isFetching) && (
+          <span className="text-xs text-muted-foreground">Refreshing...</span>
         )}
       </div>
 
       {current && (
-        <div className="grid gap-1 rounded-lg border border-dashed border-border/60 bg-muted/50 px-3 py-2 text-xs text-muted-foreground sm:grid-cols-3">
-          <div className="flex flex-col gap-0.5">
-            <span className="uppercase tracking-wide text-[0.65rem] text-muted-foreground/70">
-              Selected
-            </span>
-            <span className="font-medium text-foreground">{current.name}</span>
+        <div className="space-y-3 rounded-lg border border-dashed border-border/60 bg-muted/50 px-3 py-3 text-xs text-muted-foreground">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <InfoCell label="Selected" value={current.name} />
+            <InfoCell label="Size" value={formatBytes(current.size)} />
+            <InfoCell label="Updated" value={formatDateTime(current.modified_at)} />
+            <InfoCell
+              label="Context length"
+              value={formatTokens(modelInfo?.contextLength)}
+            />
           </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="uppercase tracking-wide text-[0.65rem] text-muted-foreground/70">
-              Size
-            </span>
-            <span>{formatBytes(current.size)}</span>
+
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <InfoCell label="Param size" value={modelInfo?.parameterSize ?? 'N/A'} />
+            <InfoCell
+              label="Quantization"
+              value={modelInfo?.quantizationLevel ?? 'N/A'}
+            />
+            <InfoCell
+              label="Capabilities"
+              value={formatCapabilities(capabilities)}
+            />
           </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="uppercase tracking-wide text-[0.65rem] text-muted-foreground/70">
-              Updated
-            </span>
-            <span>{new Date(current.modified_at).toLocaleString()}</span>
-          </div>
+
+          <InfoCell label="Parameters" value={parameterSummary} />
         </div>
+      )}
+
+      {!modelInfo && infoQuery.isLoading && (
+        <span className="text-xs text-muted-foreground">Loading model details...</span>
       )}
     </div>
   )
@@ -148,7 +171,7 @@ export default function ModelSelector({ className }: { className?: string }) {
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '—'
+    return 'N/A'
   }
 
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -159,4 +182,60 @@ function formatBytes(bytes: number) {
   const value = bytes / 1024 ** exponent
   const formatted = value >= 10 || exponent === 0 ? value.toFixed(0) : value.toFixed(1)
   return `${formatted} ${units[exponent]}`
+}
+
+function formatTokens(value?: number | null) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
+    return 'N/A'
+  }
+
+  return numberFormatter.format(value)
+}
+
+function formatDateTime(value: string) {
+  const timestamp = Date.parse(value)
+  if (Number.isNaN(timestamp)) {
+    return 'N/A'
+  }
+
+  return new Date(timestamp).toLocaleString()
+}
+
+function formatCapabilities(items: string[]) {
+  if (!items.length) {
+    return 'N/A'
+  }
+
+  return items.slice(0, 4).join(', ')
+}
+
+function formatParameterSummary(parameters: Record<string, number | string>) {
+  const priorityKeys = ['temperature', 'top_p', 'top_k', 'num_ctx', 'stop']
+  const entries: string[] = []
+
+  for (const key of priorityKeys) {
+    if (Object.prototype.hasOwnProperty.call(parameters, key)) {
+      const value = parameters[key]
+      if (value !== undefined && value !== null && String(value).length > 0) {
+        entries.push(`${key}=${value}`)
+      }
+    }
+  }
+
+  if (entries.length === 0) {
+    return 'N/A'
+  }
+
+  return entries.slice(0, 4).join(', ')
+}
+
+function InfoCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="uppercase tracking-wide text-[0.65rem] text-muted-foreground/70">
+        {label}
+      </span>
+      <span className="font-medium text-foreground wrap-break-word">{value}</span>
+    </div>
+  )
 }

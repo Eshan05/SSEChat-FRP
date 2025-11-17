@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { createFileRoute } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
 
 import { Info } from 'lucide-react'
 import type { ChatMessage } from '@pkg/zod'
@@ -13,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { API_BASE_URL } from '@/lib/api'
+import { fetchModelInfo } from '@/lib/ollama'
 
 export const Route = createFileRoute('/')({
   component: ChatPage,
@@ -29,6 +31,8 @@ type CompletionInfo = {
   promptEvalDuration?: number
   evalCount?: number
   evalDuration?: number
+  responseTimeMs?: number
+  tokensPerSecond?: number
 }
 
 type StreamEventPayload = {
@@ -50,6 +54,10 @@ type StreamEventPayload = {
 }
 
 const integerFormatter = new Intl.NumberFormat()
+const decimalFormatter = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 1,
+  minimumFractionDigits: 0,
+})
 
 function ChatPage() {
   const { model: selectedModel } = useSelectedModel()
@@ -58,6 +66,7 @@ function ChatPage() {
   const [error, setError] = useState<string | null>(null)
   const [isStreaming, setIsStreaming] = useState(false)
   const [messageInfo, setMessageInfo] = useState<Record<number, CompletionInfo>>({})
+  const pendingResponseStart = useRef<Record<number, number>>({})
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const canSend = input.trim().length > 0 && !isStreaming
@@ -83,6 +92,7 @@ function ChatPage() {
         delete next[assistantIndex]
         return next
       })
+      pendingResponseStart.current[assistantIndex] = performance.now()
 
       const controller = new AbortController()
       abortControllerRef.current = controller
@@ -131,6 +141,18 @@ function ChatPage() {
             setError(message)
           },
           (metadata: StreamEventPayload) => {
+            const startedAt = pendingResponseStart.current[assistantIndex]
+            const responseTimeMs =
+              typeof startedAt === 'number' ? performance.now() - startedAt : undefined
+            const evalSeconds =
+              typeof metadata.eval_duration === 'number' && metadata.eval_duration > 0
+                ? metadata.eval_duration / 1e9
+                : undefined
+            const tokensPerSecond =
+              evalSeconds && metadata.eval_count
+                ? metadata.eval_count / evalSeconds
+                : undefined
+
             setMessageInfo((previous) => ({
               ...previous,
               [assistantIndex]: {
@@ -142,8 +164,11 @@ function ChatPage() {
                 promptEvalDuration: metadata.prompt_eval_duration,
                 evalCount: metadata.eval_count,
                 evalDuration: metadata.eval_duration,
+                responseTimeMs,
+                tokensPerSecond,
               },
             }))
+            delete pendingResponseStart.current[assistantIndex]
           },
         )
       } catch (exception) {
@@ -157,6 +182,7 @@ function ChatPage() {
       } finally {
         abortControllerRef.current = null
         setIsStreaming(false)
+        delete pendingResponseStart.current[assistantIndex]
       }
     },
     [input, isStreaming, messages, selectedModel],
@@ -174,6 +200,19 @@ function ChatPage() {
     [isStreaming],
   )
 
+  const { data: modelInfo } = useQuery({
+    queryKey: ['model-info', selectedModel],
+    queryFn: () => fetchModelInfo(selectedModel),
+    staleTime: 1000 * 60 * 10,
+    enabled: Boolean(selectedModel),
+    refetchOnWindowFocus: false,
+  })
+
+  const analytics = useMemo(
+    () => computeAnalytics(messageInfo, modelInfo?.contextLength ?? null),
+    [messageInfo, modelInfo?.contextLength],
+  )
+
   return (
     <div className="flex min-h-screen justify-center bg-background px-4 py-10">
       <div className="flex w-full max-w-4xl flex-col gap-6">
@@ -189,6 +228,9 @@ function ChatPage() {
 
         <Card className="flex flex-1 flex-col">
           <CardContent className="flex flex-1 flex-col gap-4">
+            {analytics.totalMessages > 0 && (
+              <AnalyticsSummary analytics={analytics} />
+            )}
             <ScrollArea className="flex-1 rounded-2xl border bg-background/40">
               <div className="flex min-h-80 flex-col gap-3 p-4">
                 {hasMessages ? (
@@ -266,9 +308,32 @@ function ChatPage() {
 }
 
 function ResponseDetails({ info }: { info: CompletionInfo }) {
+  const totalTokens = (info.promptEvalCount ?? 0) + (info.evalCount ?? 0)
+  const tokensPerSecond =
+    typeof info.tokensPerSecond === 'number' && Number.isFinite(info.tokensPerSecond)
+      ? info.tokensPerSecond
+      : undefined
+  const responseTime =
+    typeof info.responseTimeMs === 'number' && info.responseTimeMs > 0
+      ? info.responseTimeMs
+      : typeof info.totalDuration === 'number' && info.totalDuration > 0
+        ? info.totalDuration / 1e6
+        : undefined
+
   const fields: Array<{ label: string; value: string }> = [
-    { label: 'Model', value: info.model ?? '—' },
-    { label: 'Done reason', value: info.doneReason ?? '—' },
+    { label: 'Model', value: info.model ?? 'N/A' },
+    {
+      label: 'Response time',
+      value: responseTime ? formatMilliseconds(responseTime) : 'N/A',
+    },
+    { label: 'Input tokens', value: formatTokens(info.promptEvalCount) },
+    { label: 'Output tokens', value: formatTokens(info.evalCount) },
+    { label: 'Total tokens', value: formatTokens(totalTokens) },
+    {
+      label: 'Tokens / second',
+      value: tokensPerSecond ? formatRate(tokensPerSecond, 'tok/s') : 'N/A',
+    },
+    { label: 'Done reason', value: info.doneReason ?? 'N/A' },
     { label: 'Total duration', value: formatDuration(info.totalDuration) },
     { label: 'Load duration', value: formatDuration(info.loadDuration) },
     {
@@ -295,7 +360,7 @@ function ResponseDetails({ info }: { info: CompletionInfo }) {
 
 function formatDuration(value?: number) {
   if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
-    return '—'
+    return 'N/A'
   }
 
   const seconds = value / 1e9
@@ -318,12 +383,247 @@ function formatDuration(value?: number) {
 
 function formatCountWithDuration(count?: number, duration?: number) {
   if (typeof count !== 'number') {
-    return '—'
+    return 'N/A'
   }
 
   const formattedCount = integerFormatter.format(count)
-  const formattedDuration = formatDuration(duration)
-  return duration ? `${formattedCount} • ${formattedDuration}` : formattedCount
+  if (typeof duration === 'number' && duration > 0) {
+    return `${formattedCount} (${formatDuration(duration)})`
+  }
+
+  return formattedCount
+}
+
+function formatTokens(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
+    return 'N/A'
+  }
+
+  return integerFormatter.format(value)
+}
+
+function formatMilliseconds(value: number) {
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(2)} s`
+  }
+
+  if (value >= 1) {
+    return `${value.toFixed(0)} ms`
+  }
+
+  return `${(value * 1000).toFixed(0)} us`
+}
+
+function formatRate(value: number, unit: string) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 'N/A'
+  }
+
+  if (value >= 100) {
+    return `${value.toFixed(0)} ${unit}`
+  }
+
+  if (value >= 10) {
+    return `${value.toFixed(1)} ${unit}`
+  }
+
+  return `${value.toFixed(2)} ${unit}`
+}
+
+function formatPercentage(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
+    return 'N/A'
+  }
+
+  if (value === 0) {
+    return '0%'
+  }
+
+  if (value >= 100) {
+    return `${value.toFixed(1)}%`
+  }
+
+  if (value >= 1) {
+    return `${value.toFixed(1)}%`
+  }
+
+  return `${value.toFixed(2)}%`
+}
+
+type SessionAnalytics = {
+  totalMessages: number
+  promptTokens: number
+  totalOutputTokens: number
+  contextTokens: number
+  averageTokensPerMessage?: number
+  tokensPerSecond?: number
+  lastTokensPerSecond?: number
+  averageResponseTimeMs?: number
+  lastResponseTimeMs?: number
+  contextWindow: number | null
+  contextUsagePercent?: number
+}
+
+function computeAnalytics(
+  infoRecord: Record<number, CompletionInfo>,
+  contextWindow: number | null,
+): SessionAnalytics {
+  const sorted = Object.entries(infoRecord)
+    .map(([index, info]) => ({ index: Number(index), info }))
+    .filter((entry) => Number.isFinite(entry.index))
+    .sort((a, b) => a.index - b.index)
+
+  const lastEntry = sorted.length > 0 ? sorted[sorted.length - 1] : undefined
+  const lastInfo = lastEntry?.info
+  const promptTokens = typeof lastInfo?.promptEvalCount === 'number' ? lastInfo.promptEvalCount : 0
+  const lastOutputTokens = typeof lastInfo?.evalCount === 'number' ? lastInfo.evalCount : 0
+  const totalOutputTokens = sorted.reduce((sum, entry) => {
+    return sum + (entry.info.evalCount ?? 0)
+  }, 0)
+  const contextTokens = promptTokens + lastOutputTokens
+
+  const totalEvalDurationSeconds = sorted.reduce((sum, entry) => {
+    const { evalDuration } = entry.info
+    if (typeof evalDuration === 'number' && evalDuration > 0) {
+      return sum + evalDuration / 1e9
+    }
+    return sum
+  }, 0)
+
+  const tokensPerSecond =
+    totalEvalDurationSeconds > 0 && totalOutputTokens > 0
+      ? totalOutputTokens / totalEvalDurationSeconds
+      : undefined
+
+  const lastTokensPerSecond =
+    lastInfo && typeof lastInfo.evalDuration === 'number' && lastInfo.evalDuration > 0 && typeof lastInfo.evalCount === 'number'
+      ? lastInfo.evalCount / (lastInfo.evalDuration / 1e9)
+      : undefined
+
+  const responseTimes = sorted
+    .map(({ info }) => {
+      if (typeof info.responseTimeMs === 'number' && info.responseTimeMs > 0) {
+        return info.responseTimeMs
+      }
+      if (typeof info.totalDuration === 'number' && info.totalDuration > 0) {
+        return info.totalDuration / 1e6
+      }
+      return undefined
+    })
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+
+  const averageResponseTimeMs = responseTimes.length
+    ? responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length
+    : undefined
+
+  const lastResponseTimeMs = responseTimes.length
+    ? responseTimes[responseTimes.length - 1]
+    : undefined
+
+  const averageTokensPerMessage =
+    sorted.length > 0 ? totalOutputTokens / sorted.length : undefined
+
+  const contextUsagePercent =
+    contextWindow && contextWindow > 0
+      ? (contextTokens / contextWindow) * 100
+      : undefined
+
+  return {
+    totalMessages: sorted.length,
+    promptTokens,
+    totalOutputTokens,
+    contextTokens,
+    averageTokensPerMessage,
+    tokensPerSecond,
+    lastTokensPerSecond,
+    averageResponseTimeMs,
+    lastResponseTimeMs,
+    contextWindow: contextWindow ?? null,
+    contextUsagePercent,
+  }
+}
+
+function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
+  const {
+    promptTokens,
+    totalOutputTokens,
+    contextTokens,
+    averageTokensPerMessage,
+    tokensPerSecond,
+    lastTokensPerSecond,
+    averageResponseTimeMs,
+    lastResponseTimeMs,
+    contextWindow,
+    contextUsagePercent,
+  } = analytics
+
+  const metrics: Array<{ label: string; value: string }> = [
+    { label: 'Prompt tokens', value: formatTokens(promptTokens) },
+    { label: 'Output tokens', value: formatTokens(totalOutputTokens) },
+    { label: 'Context tokens', value: formatTokens(contextTokens) },
+    {
+      label: 'Avg tokens / message',
+      value:
+        typeof averageTokensPerMessage === 'number'
+          ? decimalFormatter.format(averageTokensPerMessage)
+          : 'N/A',
+    },
+    {
+      label: 'Tokens / second (avg)',
+      value:
+        typeof tokensPerSecond === 'number'
+          ? formatRate(tokensPerSecond, 'tok/s')
+          : 'N/A',
+    },
+    {
+      label: 'Tokens / second (last)',
+      value:
+        typeof lastTokensPerSecond === 'number'
+          ? formatRate(lastTokensPerSecond, 'tok/s')
+          : 'N/A',
+    },
+    {
+      label: 'Response time (avg)',
+      value:
+        typeof averageResponseTimeMs === 'number'
+          ? formatMilliseconds(averageResponseTimeMs)
+          : 'N/A',
+    },
+    {
+      label: 'Response time (last)',
+      value:
+        typeof lastResponseTimeMs === 'number'
+          ? formatMilliseconds(lastResponseTimeMs)
+          : 'N/A',
+    },
+  ]
+
+  const contextValue = contextWindow
+    ? `${formatPercentage(contextUsagePercent)} (${formatTokens(
+      contextTokens,
+    )} / ${formatTokens(contextWindow)})`
+    : 'N/A'
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-muted/40 p-4">
+      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {metrics.map((metric) => (
+          <div key={metric.label} className="space-y-1">
+            <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+              {metric.label}
+            </dt>
+            <dd className="text-sm font-medium text-foreground">{metric.value}</dd>
+          </div>
+        ))}
+        <div className="space-y-1">
+          <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+            Context usage
+          </dt>
+          <dd className="text-sm font-medium text-foreground">{contextValue}</dd>
+        </div>
+      </dl>
+    </div>
+  )
 }
 
 async function readErrorMessage(response: Response) {

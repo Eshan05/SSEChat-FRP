@@ -30,6 +30,55 @@ const ollamaRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
+  fastify.get('/models/info', async (request, reply) => {
+    const { model } = request.query as { model?: string };
+
+    if (!model) {
+      return reply.code(400).send({ error: 'Query parameter "model" is required' });
+    }
+
+    try {
+      const response = await axios.post(`${OLLAMA_BASE}/api/show`, { model });
+      const payload = response.data ?? {};
+      const contextLength = extractContextLength(payload);
+      const parsedParameters = parseParameterBlock(payload.parameters);
+
+      return {
+        model,
+        modified_at: payload.modified_at ?? null,
+        capabilities: Array.isArray(payload.capabilities) ? payload.capabilities : [],
+        license: typeof payload.license === 'string' ? payload.license : null,
+        parameters: parsedParameters,
+        context_length: contextLength,
+        parameter_size: payload.details?.parameter_size ?? null,
+        quantization_level: payload.details?.quantization_level ?? null,
+        model_info: payload.model_info ?? null,
+        details: payload.details ?? null,
+      };
+    } catch (error) {
+      const formattedError = formatOllamaError(error);
+      fastify.log.error({ error: formattedError, cause: extractAxiosMeta(error) }, 'Failed to fetch model info');
+      return reply.code(500).send({ error: formattedError });
+    }
+  });
+
+  fastify.get('/models/:model', async (request, reply) => {
+    const { model } = request.params as { model: string };
+
+    try {
+      const response = await axios({
+        method: 'POST',
+        url: `${OLLAMA_BASE}/api/show`,
+        data: { model },
+      });
+
+      return response.data ?? null;
+    } catch (error) {
+      fastify.log.error({ error, model }, 'Failed to fetch Ollama model details');
+      return reply.code(500).send({ error: 'Failed to fetch model details' });
+    }
+  });
+
   fastify.post('/chat', async (request, reply) => {
     const parseResult = ChatRequest.safeParse(request.body);
 
@@ -203,6 +252,70 @@ function* parseOllamaLine(line: string, logger: FastifyBaseLogger) {
   } catch (error) {
     logger.warn({ error, line }, 'Unable to parse Ollama chunk');
   }
+}
+
+function extractContextLength(payload: Record<string, unknown>) {
+  const candidates: Array<number | undefined> = [];
+
+  const topLevel = payload['context_length'];
+  if (typeof topLevel === 'number') {
+    candidates.push(topLevel);
+  }
+
+  const details = payload['details'] as Record<string, unknown> | undefined;
+  if (details && typeof details.context_length === 'number') {
+    candidates.push(details.context_length as number);
+  }
+
+  const modelInfo = payload['model_info'] as Record<string, unknown> | undefined;
+  if (modelInfo) {
+    for (const [key, value] of Object.entries(modelInfo)) {
+      if (typeof value === 'number' && /context_length|ctx_length|num_ctx/i.test(key)) {
+        candidates.push(value);
+      }
+    }
+  }
+
+  const parametersBlock = typeof payload['parameters'] === 'string' ? (payload['parameters'] as string) : undefined;
+  if (parametersBlock) {
+    const parsed = parseParameterBlock(parametersBlock);
+    const maybeKeys = ['num_ctx', 'ctx', 'context_length'];
+    for (const key of maybeKeys) {
+      const candidate = parsed[key];
+      if (typeof candidate === 'number') {
+        candidates.push(candidate);
+        break;
+      }
+    }
+  }
+
+  return candidates.find((value) => typeof value === 'number' && Number.isFinite(value) && value > 0) ?? null;
+}
+
+function parseParameterBlock(parameters?: string) {
+  const result: Record<string, number | string> = {};
+
+  if (!parameters) {
+    return result;
+  }
+
+  for (const rawLine of parameters.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const [key, ...rest] = line.split(/\s+/);
+    if (!key) continue;
+
+    const valueRaw = rest.join(' ');
+    const numericValue = Number(valueRaw);
+    if (!Number.isNaN(numericValue) && valueRaw.length > 0 && /^-?\d+(\.\d+)?$/.test(valueRaw)) {
+      result[key] = numericValue;
+    } else {
+      result[key] = valueRaw ?? '';
+    }
+  }
+
+  return result;
 }
 
 function formatOllamaError(error: unknown) {
