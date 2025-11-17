@@ -14,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { API_BASE_URL } from '@/lib/api'
 import { fetchModelInfo } from '@/lib/ollama'
+import { cn } from '@/lib/utils'
 
 export const Route = createFileRoute('/')({
   component: ChatPage,
@@ -191,8 +192,8 @@ function ChatPage() {
   const hintText = useMemo(
     () =>
       isStreaming
-        ? 'Streaming response from Fastify / Ollama...'
-        : 'Ask anything and responses will stream as they arrive.',
+        ? 'Streaming response'
+        : 'Ensure Ollama is served beforehand.',
     [isStreaming],
   )
 
@@ -217,11 +218,11 @@ function ChatPage() {
             <div className="max-w-xl space-y-3">
               <Badge variant="outline" className="rounded-full border-primary/60 bg-primary/10 text-primary">
                 <Sparkles className="size-3.5" />
-                Streaming made friendly
+                Local AI Powered Chat
               </Badge>
-              <div className="space-y-2">
+              <div className="space-y-0">
                 <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-                  Conversational AI with real-time updates
+                  SSE Streaming Chat
                 </h1>
                 <p className="text-sm text-muted-foreground">
                   {hintText}
@@ -581,18 +582,63 @@ function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
     lastResponseTimeMs,
     contextWindow,
     contextUsagePercent,
+    totalMessages,
   } = analytics
 
-  const metrics: Array<{ label: string; value: string }> = [
-    { label: 'Prompt tokens', value: formatTokens(promptTokens) },
-    { label: 'Output tokens', value: formatTokens(totalOutputTokens) },
-    { label: 'Context tokens', value: formatTokens(contextTokens) },
+  const tokensPerSecondDelta =
+    typeof tokensPerSecond === 'number' && tokensPerSecond > 0 &&
+    typeof lastTokensPerSecond === 'number'
+      ? ((lastTokensPerSecond - tokensPerSecond) / tokensPerSecond) * 100
+      : undefined
+
+  const tokensPerSecondDeltaInfo = resolveDelta(tokensPerSecondDelta)
+
+  const responseTimeDelta =
+    typeof averageResponseTimeMs === 'number' && averageResponseTimeMs > 0 &&
+    typeof lastResponseTimeMs === 'number'
+      ? ((averageResponseTimeMs - lastResponseTimeMs) / averageResponseTimeMs) * 100
+      : undefined
+
+  const responseTimeDeltaInfo = resolveDelta(responseTimeDelta)
+
+  const contextUsageValue = contextWindow
+    ? `${formatPercentage(contextUsagePercent)} of ${formatTokens(contextWindow)} window`
+    : 'N/A'
+
+  const contextUsageDetail =
+    typeof contextWindow === 'number' && contextWindow > 0
+      ? `${formatTokens(contextTokens)} / ${formatTokens(contextWindow)} tokens`
+      : undefined
+
+  const metrics: Array<{
+    label: string
+    value: string
+    detail?: string
+    delta?: string
+    deltaType?: 'positive' | 'negative' | 'neutral'
+  }> = [
+    {
+      label: 'Prompt tokens',
+      value: formatTokens(promptTokens),
+      detail: 'Latest user input',
+    },
+    {
+      label: 'Output tokens',
+      value: formatTokens(totalOutputTokens),
+      detail: 'Assistant responses this session',
+    },
+    {
+      label: 'Context tokens',
+      value: formatTokens(contextTokens),
+      detail: 'Current turn prompt + output',
+    },
     {
       label: 'Avg tokens / message',
       value:
         typeof averageTokensPerMessage === 'number'
           ? decimalFormatter.format(averageTokensPerMessage)
           : 'N/A',
+      detail: totalMessages > 0 ? `${totalMessages} turns analyzed` : undefined,
     },
     {
       label: 'Tokens / second (avg)',
@@ -600,6 +646,10 @@ function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
         typeof tokensPerSecond === 'number'
           ? formatRate(tokensPerSecond, 'tok/s')
           : 'N/A',
+      detail:
+        typeof lastTokensPerSecond === 'number'
+          ? `Last: ${formatRate(lastTokensPerSecond, 'tok/s')}`
+          : undefined,
     },
     {
       label: 'Tokens / second (last)',
@@ -607,6 +657,12 @@ function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
         typeof lastTokensPerSecond === 'number'
           ? formatRate(lastTokensPerSecond, 'tok/s')
           : 'N/A',
+      detail:
+        typeof tokensPerSecond === 'number'
+          ? `Avg: ${formatRate(tokensPerSecond, 'tok/s')}`
+          : undefined,
+      delta: tokensPerSecondDeltaInfo?.label,
+      deltaType: tokensPerSecondDeltaInfo?.type,
     },
     {
       label: 'Response time (avg)',
@@ -614,6 +670,10 @@ function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
         typeof averageResponseTimeMs === 'number'
           ? formatMilliseconds(averageResponseTimeMs)
           : 'N/A',
+      detail:
+        typeof lastResponseTimeMs === 'number'
+          ? `Last: ${formatMilliseconds(lastResponseTimeMs)}`
+          : undefined,
     },
     {
       label: 'Response time (last)',
@@ -621,35 +681,82 @@ function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
         typeof lastResponseTimeMs === 'number'
           ? formatMilliseconds(lastResponseTimeMs)
           : 'N/A',
+      detail:
+        typeof averageResponseTimeMs === 'number'
+          ? `Avg: ${formatMilliseconds(averageResponseTimeMs)}`
+          : undefined,
+      delta: responseTimeDeltaInfo?.label,
+      deltaType: responseTimeDeltaInfo?.type,
+    },
+    {
+      label: 'Context usage',
+      value: contextUsageValue,
+      detail: contextUsageDetail,
     },
   ]
 
-  const contextValue = contextWindow
-    ? `${formatPercentage(contextUsagePercent)} (${formatTokens(
-      contextTokens,
-    )} / ${formatTokens(contextWindow)})`
-    : 'N/A'
-
   return (
-    <div className="rounded-xl border border-border/60 bg-muted/40 p-4">
-      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {metrics.map((metric) => (
-          <div key={metric.label} className="space-y-1">
-            <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-              {metric.label}
-            </dt>
-            <dd className="text-sm font-medium text-foreground">{metric.value}</dd>
-          </div>
+    <div className="rounded-2xl border border-border/60 bg-card/70 p-1 shadow-sm">
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-[1.4rem] bg-border sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {metrics.map((metric, index) => (
+          <Card
+            key={metric.label}
+            className={cn(
+              'rounded-none border-0 bg-background/90 shadow-none backdrop-blur-sm transition-colors hover:bg-background',
+              index === 0 && 'sm:rounded-tl-[1.4rem]',
+              index === 1 && 'sm:rounded-tr-[1.4rem] lg:rounded-tr-none',
+            )}
+          >
+            <CardContent className="flex h-full flex-col gap-3 p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+                  {metric.label}
+                </p>
+                {metric.delta && (
+                  <span
+                    className={cn(
+                      'text-xs font-medium uppercase tracking-tight',
+                      metric.deltaType === 'positive' && 'text-emerald-500',
+                      metric.deltaType === 'negative' && 'text-red-500',
+                      metric.deltaType === 'neutral' && 'text-muted-foreground',
+                    )}
+                  >
+                    {metric.delta}
+                  </span>
+                )}
+              </div>
+              <div className="text-2xl font-semibold tracking-tight text-foreground">
+                {metric.value}
+              </div>
+              {metric.detail && (
+                <p className="text-xs text-muted-foreground">{metric.detail}</p>
+              )}
+            </CardContent>
+          </Card>
         ))}
-        <div className="space-y-1">
-          <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-            Context usage
-          </dt>
-          <dd className="text-sm font-medium text-foreground">{contextValue}</dd>
-        </div>
-      </dl>
+      </div>
     </div>
   )
+}
+
+type DeltaInfo = { label: string; type: 'positive' | 'negative' | 'neutral' }
+
+function resolveDelta(value?: number): DeltaInfo | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined
+  }
+
+  const absValue = Math.abs(value)
+  if (absValue < 0.1) {
+    return { label: 'Δ 0%', type: 'neutral' }
+  }
+
+  const formatted = absValue >= 10 ? absValue.toFixed(0) : absValue.toFixed(1)
+  const prefix = value > 0 ? '+' : '-'
+  return {
+    label: `Δ ${prefix}${formatted}%`,
+    type: value > 0 ? 'positive' : 'negative',
+  }
 }
 
 async function readErrorMessage(response: Response) {

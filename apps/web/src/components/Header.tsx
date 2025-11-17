@@ -23,7 +23,7 @@ export default function Header() {
             </span>
             <div className="flex flex-col leading-tight">
               <span className="text-sm font-semibold tracking-tight">SSE Chat</span>
-              <span className="text-xs text-muted-foreground">Fastify · TanStack · Ollama</span>
+              <span className="text-xs text-muted-foreground">Fastify · TanStack</span>
             </div>
           </Link>
           <Separator orientation="vertical" className="hidden h-8 sm:block" />
