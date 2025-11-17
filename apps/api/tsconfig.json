@@ -9,6 +9,12 @@
     "types": [
       "node"
     ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    },
+    "baseUrl": ".",
     "outDir": "dist",
     "rootDir": "src"
   },

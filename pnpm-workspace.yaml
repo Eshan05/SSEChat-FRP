@@ -3,7 +3,7 @@ packages:
   - packages/*
 
 catalog:
+  axios: ^1.13.2
   tsx: ^4.20.6
   typescript: ^5.9.3
-  zod: ^4.1.12
-  axios: ^1.13.2
+  zod: 4.1.12
