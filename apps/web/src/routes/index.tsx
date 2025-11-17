@@ -3,15 +3,14 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 
-import { Info } from 'lucide-react'
+import { Info, Radio, Sparkles } from 'lucide-react'
 import type { ChatMessage } from '@pkg/zod'
 
-import ModelSelector from '@/components/ModelSelector'
+import { ChatComposer } from '@/components/ChatComposer'
 import { useSelectedModel } from '@/components/SelectedModelProvider'
-import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { API_BASE_URL } from '@/lib/api'
 import { fetchModelInfo } from '@/lib/ollama'
@@ -66,127 +65,124 @@ function ChatPage() {
   const [error, setError] = useState<string | null>(null)
   const [isStreaming, setIsStreaming] = useState(false)
   const [messageInfo, setMessageInfo] = useState<Record<number, CompletionInfo>>({})
+  const [attachments, setAttachments] = useState<File[]>([])
   const pendingResponseStart = useRef<Record<number, number>>({})
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const canSend = input.trim().length > 0 && !isStreaming
   const hasMessages = messages.length > 0
 
-  const handleSubmit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
+  const sendPrompt = useCallback(async () => {
+    const prompt = input.trim()
+    if (!prompt || isStreaming) return
 
-      const prompt = input.trim()
-      if (!prompt || isStreaming) return
+    const userMessage: UIMessage = { role: 'user', content: prompt }
+    const conversation = [...messages, userMessage]
+    const assistantIndex = conversation.length
 
-      const userMessage: UIMessage = { role: 'user', content: prompt }
-      const conversation = [...messages, userMessage]
-      const assistantIndex = conversation.length
+    setMessages([...conversation, { role: 'assistant', content: '' }])
+    setInput('')
+    setAttachments([])
+    setError(null)
+    setIsStreaming(true)
+    setMessageInfo((previous) => {
+      const next = { ...previous }
+      delete next[assistantIndex]
+      return next
+    })
+    pendingResponseStart.current[assistantIndex] = performance.now()
 
-      setMessages([...conversation, { role: 'assistant', content: '' }])
-      setInput('')
-      setError(null)
-      setIsStreaming(true)
-      setMessageInfo((previous) => {
-        const next = { ...previous }
-        delete next[assistantIndex]
-        return next
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        mode: 'cors',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: conversation,
+        }),
+        signal: controller.signal,
       })
-      pendingResponseStart.current[assistantIndex] = performance.now()
 
-      const controller = new AbortController()
-      abortControllerRef.current = controller
-
-      try {
-        const response = await fetch(`${API_BASE_URL}/chat`, {
-          method: 'POST',
-          mode: 'cors',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'text/event-stream',
-          },
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: conversation,
-          }),
-          signal: controller.signal,
-        })
-
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response))
-        }
-
-        if (!response.body) {
-          throw new Error('Streaming is not supported in this environment.')
-        }
-
-        await consumeEventStream(
-          response.body,
-          (delta) => {
-            setMessages((previous) => {
-              const next = [...previous]
-              const candidate = next[assistantIndex]
-
-              if (candidate) {
-                next[assistantIndex] = {
-                  ...candidate,
-                  content: candidate.content + delta,
-                }
-              }
-
-              return next
-            })
-          },
-          (message) => {
-            setError(message)
-          },
-          (metadata: StreamEventPayload) => {
-            const startedAt = pendingResponseStart.current[assistantIndex]
-            const responseTimeMs =
-              typeof startedAt === 'number' ? performance.now() - startedAt : undefined
-            const evalSeconds =
-              typeof metadata.eval_duration === 'number' && metadata.eval_duration > 0
-                ? metadata.eval_duration / 1e9
-                : undefined
-            const tokensPerSecond =
-              evalSeconds && metadata.eval_count
-                ? metadata.eval_count / evalSeconds
-                : undefined
-
-            setMessageInfo((previous) => ({
-              ...previous,
-              [assistantIndex]: {
-                model: metadata.model,
-                doneReason: metadata.done_reason,
-                totalDuration: metadata.total_duration,
-                loadDuration: metadata.load_duration,
-                promptEvalCount: metadata.prompt_eval_count,
-                promptEvalDuration: metadata.prompt_eval_duration,
-                evalCount: metadata.eval_count,
-                evalDuration: metadata.eval_duration,
-                responseTimeMs,
-                tokensPerSecond,
-              },
-            }))
-            delete pendingResponseStart.current[assistantIndex]
-          },
-        )
-      } catch (exception) {
-        if ((exception as DOMException)?.name === 'AbortError') {
-          return
-        }
-
-        const fallbackMessage =
-          exception instanceof Error ? exception.message : 'Unexpected error'
-        setError(fallbackMessage)
-      } finally {
-        abortControllerRef.current = null
-        setIsStreaming(false)
-        delete pendingResponseStart.current[assistantIndex]
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response))
       }
-    },
-    [input, isStreaming, messages, selectedModel],
-  )
+
+      if (!response.body) {
+        throw new Error('Streaming is not supported in this environment.')
+      }
+
+      await consumeEventStream(
+        response.body,
+        (delta) => {
+          setMessages((previous) => {
+            const next = [...previous]
+            const candidate = next[assistantIndex]
+
+            if (candidate) {
+              next[assistantIndex] = {
+                ...candidate,
+                content: candidate.content + delta,
+              }
+            }
+
+            return next
+          })
+        },
+        (message) => {
+          setError(message)
+        },
+        (metadata: StreamEventPayload) => {
+          const startedAt = pendingResponseStart.current[assistantIndex]
+          const responseTimeMs =
+            typeof startedAt === 'number' ? performance.now() - startedAt : undefined
+          const evalSeconds =
+            typeof metadata.eval_duration === 'number' && metadata.eval_duration > 0
+              ? metadata.eval_duration / 1e9
+              : undefined
+          const tokensPerSecond =
+            evalSeconds && metadata.eval_count
+              ? metadata.eval_count / evalSeconds
+              : undefined
+
+          setMessageInfo((previous) => ({
+            ...previous,
+            [assistantIndex]: {
+              model: metadata.model,
+              doneReason: metadata.done_reason,
+              totalDuration: metadata.total_duration,
+              loadDuration: metadata.load_duration,
+              promptEvalCount: metadata.prompt_eval_count,
+              promptEvalDuration: metadata.prompt_eval_duration,
+              evalCount: metadata.eval_count,
+              evalDuration: metadata.eval_duration,
+              responseTimeMs,
+              tokensPerSecond,
+            },
+          }))
+          delete pendingResponseStart.current[assistantIndex]
+        },
+      )
+    } catch (exception) {
+      if ((exception as DOMException)?.name === 'AbortError') {
+        return
+      }
+
+      const fallbackMessage =
+        exception instanceof Error ? exception.message : 'Unexpected error'
+      setError(fallbackMessage)
+    } finally {
+      abortControllerRef.current = null
+      setIsStreaming(false)
+      delete pendingResponseStart.current[assistantIndex]
+    }
+  }, [input, isStreaming, messages, selectedModel])
 
   const stopStreaming = useCallback(() => {
     abortControllerRef.current?.abort()
@@ -214,19 +210,57 @@ function ChatPage() {
   )
 
   return (
-    <div className="flex min-h-screen justify-center bg-background px-4 py-10">
-      <div className="flex w-full max-w-4xl flex-col gap-6">
-        <header className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
-          <div className="flex flex-col">
-            <h1 className="text-3xl font-semibold tracking-tight">SSE Chat</h1>
-            <p className="text-sm text-muted-foreground">{hintText}</p>
-          </div>
-          <div className="w-full sm:w-auto">
-            <ModelSelector />
-          </div>
-        </header>
+    <main className="flex min-h-screen justify-center bg-muted/30 px-4 py-12">
+      <div className="flex w-full max-w-5xl flex-col gap-8">
+        <section className="relative overflow-hidden rounded-3xl border border-border/60 bg-card/80 px-8 py-10 shadow-xl">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+            <div className="max-w-xl space-y-3">
+              <Badge variant="outline" className="rounded-full border-primary/60 bg-primary/10 text-primary">
+                <Sparkles className="size-3.5" />
+                Streaming made friendly
+              </Badge>
+              <div className="space-y-2">
+                <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                  Conversational AI with real-time updates
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  {hintText}
+                </p>
+              </div>
+            </div>
 
-        <Card className="flex flex-1 flex-col">
+            <div className="flex shrink-0 flex-col gap-3 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 rounded-2xl border border-border/60 bg-background/70 px-4 py-3 shadow-sm">
+                <Radio className="size-4 text-primary" />
+                <div className="flex flex-col">
+                  <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+                    Active model
+                  </span>
+                  <span className="text-sm font-medium text-foreground">
+                    {selectedModel || 'Select a model below'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 rounded-2xl border border-border/60 bg-background/70 px-4 py-3 shadow-sm">
+                <Info className="size-4 text-primary" />
+                <div className="flex flex-col">
+                  <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+                    Context length
+                  </span>
+                  <span className="text-sm font-medium text-foreground">
+                    {modelInfo?.contextLength
+                      ? new Intl.NumberFormat().format(modelInfo.contextLength)
+                      : 'Awaiting model info'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="pointer-events-none absolute -right-24 top-1/2 hidden h-56 w-56 -translate-y-1/2 rounded-full bg-primary/10 blur-3xl sm:block" />
+        </section>
+
+        <Card className="flex flex-1 flex-col border-border/60 bg-card/60 backdrop-blur">
           <CardContent className="flex flex-1 flex-col gap-4">
             {analytics.totalMessages > 0 && (
               <AnalyticsSummary analytics={analytics} />
@@ -279,31 +313,23 @@ function ChatPage() {
           </CardContent>
 
           <CardFooter className="flex flex-col items-stretch gap-3">
-            <form onSubmit={handleSubmit} className="w-full space-y-3">
-              <Textarea
-                className="min-h-28 rounded-2xl bg-card"
-                placeholder="Type your prompt..."
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                disabled={isStreaming}
-              />
-
-              <div className="flex flex-wrap items-center gap-3">
-                <Button type="submit" disabled={!canSend}>
-                  Send
-                </Button>
-
-                {isStreaming && (
-                  <Button type="button" variant="outline" onClick={stopStreaming}>
-                    Stop
-                  </Button>
-                )}
-              </div>
-            </form>
+            <ChatComposer
+              inputValue={input}
+              onInputChange={setInput}
+              onSubmit={() => {
+                void sendPrompt()
+              }}
+              onStop={stopStreaming}
+              canSend={canSend}
+              isStreaming={isStreaming}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              modelInfo={modelInfo}
+            />
           </CardFooter>
         </Card>
       </div>
-    </div>
+    </main>
   )
 }
 

@@ -1,42 +1,74 @@
 import { Link } from '@tanstack/react-router'
-import { Home, Network } from 'lucide-react'
+import { Github, Home, Network, Sparkle } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
+
+const navItems = [
+  {
+    to: '/',
+    label: 'Chat',
+    icon: Home,
+  },
+]
 
 export default function Header() {
-  // Simplified header — no sidebar/drawer
-
   return (
-    <>
-      <header className="p-4 flex items-center justify-between bg-gray-800 text-white shadow-lg">
-        <div className="flex items-center">
-          <h1 className="mr-4 text-xl font-semibold">
-            <Link to="/">
-              <img
-                src="/tanstack-word-logo-white.svg"
-                alt="TanStack Logo"
-                className="h-10"
-              />
-            </Link>
-          </h1>
-          <nav className="hidden md:flex gap-2">
-            <Link
-              to="/"
-              className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 transition-colors"
-              activeProps={{ className: 'bg-cyan-600 hover:bg-cyan-700' }}
-            >
-              <Home size={20} />
-              <span className="font-medium">Home</span>
-            </Link>
-            <Link
-              to="/demo/tanstack-query"
-              className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 transition-colors"
-              activeProps={{ className: 'bg-cyan-600 hover:bg-cyan-700' }}
-            >
-              <Network size={20} />
-              <span className="font-medium">TanStack Query</span>
-            </Link>
+    <header className="sticky top-0 z-40 w-full border-b border-border/60 bg-background/80 backdrop-blur-md">
+      <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-3">
+          <Link to="/" className="flex items-center gap-2 text-foreground">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Sparkle className="size-5" />
+            </span>
+            <div className="flex flex-col leading-tight">
+              <span className="text-sm font-semibold tracking-tight">SSE Chat</span>
+              <span className="text-xs text-muted-foreground">Fastify · TanStack · Ollama</span>
+            </div>
+          </Link>
+          <Separator orientation="vertical" className="hidden h-8 sm:block" />
+          <nav className="hidden items-center gap-1 sm:flex">
+            {navItems.map(({ to, label, icon: Icon }) => (
+              <Button
+                key={to}
+                asChild
+                variant="ghost"
+                size="sm"
+                className="gap-2 rounded-full text-xs font-medium"
+              >
+                <Link
+                  to={to}
+                  activeProps={{ className: 'bg-primary/10 text-primary hover:bg-primary/20' }}
+                >
+                  <Icon className="size-3.5" />
+                  {label}
+                </Link>
+              </Button>
+            ))}
           </nav>
         </div>
-      </header>
-    </>
+
+        <div className="flex items-center gap-2">
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            className="hidden gap-2 rounded-full text-xs font-medium sm:inline-flex"
+          >
+            <a
+              href="https://github.com/Eshan05/SSEChat-FRP"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Github className="size-3.5" />
+              View Source
+            </a>
+          </Button>
+          <Button asChild variant="default" size="sm" className="rounded-full text-xs font-semibold">
+            <Link to="/">Start chatting</Link>
+          </Button>
+        </div>
+      </div>
+    </header>
   )
 }
