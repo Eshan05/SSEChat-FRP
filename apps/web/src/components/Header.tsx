@@ -9,13 +9,13 @@ export default function Header() {
       <header className="p-4 flex items-center justify-between bg-gray-800 text-white shadow-lg">
         <div className="flex items-center">
           <h1 className="mr-4 text-xl font-semibold">
-          <Link to="/">
-            <img
-              src="/tanstack-word-logo-white.svg"
-              alt="TanStack Logo"
-              className="h-10"
-            />
-          </Link>
+            <Link to="/">
+              <img
+                src="/tanstack-word-logo-white.svg"
+                alt="TanStack Logo"
+                className="h-10"
+              />
+            </Link>
           </h1>
           <nav className="hidden md:flex gap-2">
             <Link
