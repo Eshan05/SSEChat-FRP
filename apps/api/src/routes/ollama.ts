@@ -153,6 +153,51 @@ function* parseOllamaLine(line: string, logger: FastifyBaseLogger) {
     }
 
     if (parsed.done) {
+      const {
+        message,
+        response,
+        created_at: createdAt,
+        done_reason: doneReason,
+        total_duration: totalDuration,
+        load_duration: loadDuration,
+        prompt_eval_count: promptEvalCount,
+        prompt_eval_duration: promptEvalDuration,
+        eval_count: evalCount,
+        eval_duration: evalDuration,
+        model,
+        done,
+      } = parsed as {
+        message?: unknown;
+        response?: unknown;
+        created_at?: string;
+        done_reason?: string;
+        total_duration?: number;
+        load_duration?: number;
+        prompt_eval_count?: number;
+        prompt_eval_duration?: number;
+        eval_count?: number;
+        eval_duration?: number;
+        model?: string;
+        done?: boolean;
+      };
+
+      yield {
+        data: JSON.stringify({
+          done: done ?? true,
+          model,
+          created_at: createdAt,
+          done_reason: doneReason,
+          total_duration: totalDuration,
+          load_duration: loadDuration,
+          prompt_eval_count: promptEvalCount,
+          prompt_eval_duration: promptEvalDuration,
+          eval_count: evalCount,
+          eval_duration: evalDuration,
+          message,
+          response,
+        }),
+      } satisfies SSEEvent;
+
       yield { data: '[DONE]' } satisfies SSEEvent;
     }
   } catch (error) {
