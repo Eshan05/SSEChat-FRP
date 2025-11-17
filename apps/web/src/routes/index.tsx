@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
+import ModelSelector from '../components/ModelSelector'
 
 import { createFileRoute } from '@tanstack/react-router'
 
 import type { ChatMessage } from '@pkg/zod'
+import { useSelectedModel } from '../components/SelectedModelProvider'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
-const DEFAULT_MODEL = import.meta.env.VITE_OLLAMA_MODEL ?? 'gemma3:1b'
+import { API_BASE_URL } from '../lib/api'
 
 export const Route = createFileRoute('/')({
   component: ChatPage,
@@ -14,6 +15,7 @@ export const Route = createFileRoute('/')({
 type UIMessage = Pick<ChatMessage, 'role' | 'content'>
 
 function ChatPage() {
+  const { model: selectedModel } = useSelectedModel()
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -51,7 +53,7 @@ function ChatPage() {
             'Accept': 'text/event-stream',
           },
           body: JSON.stringify({
-            model: DEFAULT_MODEL,
+            model: selectedModel,
             messages: conversation,
           }),
           signal: controller.signal,
@@ -117,9 +119,14 @@ function ChatPage() {
   return (
     <div className="flex min-h-screen justify-center bg-background px-4 py-10">
       <div className="flex w-full max-w-4xl flex-col gap-6">
-        <header className="space-y-2 text-center">
-          <h1 className="text-3xl font-semibold tracking-tight">SSE Chat</h1>
-          <p className="text-sm text-muted-foreground">{hintText}</p>
+        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <div className="flex flex-col">
+            <h1 className="text-3xl font-semibold tracking-tight">SSE Chat</h1>
+            <p className="text-sm text-muted-foreground">{hintText}</p>
+          </div>
+          <div className="w-full sm:w-auto">
+            <ModelSelector />
+          </div>
         </header>
 
         <section className="flex flex-1 flex-col rounded-3xl border bg-card p-4 shadow-sm md:p-6">
