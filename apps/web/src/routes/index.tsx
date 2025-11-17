@@ -587,7 +587,7 @@ function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
 
   const tokensPerSecondDelta =
     typeof tokensPerSecond === 'number' && tokensPerSecond > 0 &&
-    typeof lastTokensPerSecond === 'number'
+      typeof lastTokensPerSecond === 'number'
       ? ((lastTokensPerSecond - tokensPerSecond) / tokensPerSecond) * 100
       : undefined
 
@@ -595,7 +595,7 @@ function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
 
   const responseTimeDelta =
     typeof averageResponseTimeMs === 'number' && averageResponseTimeMs > 0 &&
-    typeof lastResponseTimeMs === 'number'
+      typeof lastResponseTimeMs === 'number'
       ? ((averageResponseTimeMs - lastResponseTimeMs) / averageResponseTimeMs) * 100
       : undefined
 
@@ -617,83 +617,83 @@ function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
     delta?: string
     deltaType?: 'positive' | 'negative' | 'neutral'
   }> = [
-    {
-      label: 'Prompt tokens',
-      value: formatTokens(promptTokens),
-      detail: 'Latest user input',
-    },
-    {
-      label: 'Output tokens',
-      value: formatTokens(totalOutputTokens),
-      detail: 'Assistant responses this session',
-    },
-    {
-      label: 'Context tokens',
-      value: formatTokens(contextTokens),
-      detail: 'Current turn prompt + output',
-    },
-    {
-      label: 'Avg tokens / message',
-      value:
-        typeof averageTokensPerMessage === 'number'
-          ? decimalFormatter.format(averageTokensPerMessage)
-          : 'N/A',
-      detail: totalMessages > 0 ? `${totalMessages} turns analyzed` : undefined,
-    },
-    {
-      label: 'Tokens / second (avg)',
-      value:
-        typeof tokensPerSecond === 'number'
-          ? formatRate(tokensPerSecond, 'tok/s')
-          : 'N/A',
-      detail:
-        typeof lastTokensPerSecond === 'number'
-          ? `Last: ${formatRate(lastTokensPerSecond, 'tok/s')}`
-          : undefined,
-    },
-    {
-      label: 'Tokens / second (last)',
-      value:
-        typeof lastTokensPerSecond === 'number'
-          ? formatRate(lastTokensPerSecond, 'tok/s')
-          : 'N/A',
-      detail:
-        typeof tokensPerSecond === 'number'
-          ? `Avg: ${formatRate(tokensPerSecond, 'tok/s')}`
-          : undefined,
-      delta: tokensPerSecondDeltaInfo?.label,
-      deltaType: tokensPerSecondDeltaInfo?.type,
-    },
-    {
-      label: 'Response time (avg)',
-      value:
-        typeof averageResponseTimeMs === 'number'
-          ? formatMilliseconds(averageResponseTimeMs)
-          : 'N/A',
-      detail:
-        typeof lastResponseTimeMs === 'number'
-          ? `Last: ${formatMilliseconds(lastResponseTimeMs)}`
-          : undefined,
-    },
-    {
-      label: 'Response time (last)',
-      value:
-        typeof lastResponseTimeMs === 'number'
-          ? formatMilliseconds(lastResponseTimeMs)
-          : 'N/A',
-      detail:
-        typeof averageResponseTimeMs === 'number'
-          ? `Avg: ${formatMilliseconds(averageResponseTimeMs)}`
-          : undefined,
-      delta: responseTimeDeltaInfo?.label,
-      deltaType: responseTimeDeltaInfo?.type,
-    },
-    {
-      label: 'Context usage',
-      value: contextUsageValue,
-      detail: contextUsageDetail,
-    },
-  ]
+      {
+        label: 'Prompt tokens',
+        value: formatTokens(promptTokens),
+        detail: 'Latest user input',
+      },
+      {
+        label: 'Output tokens',
+        value: formatTokens(totalOutputTokens),
+        detail: 'Assistant responses this session',
+      },
+      {
+        label: 'Context tokens',
+        value: formatTokens(contextTokens),
+        detail: 'Current turn prompt + output',
+      },
+      {
+        label: 'Avg tokens / message',
+        value:
+          typeof averageTokensPerMessage === 'number'
+            ? decimalFormatter.format(averageTokensPerMessage)
+            : 'N/A',
+        detail: totalMessages > 0 ? `${totalMessages} turns analyzed` : undefined,
+      },
+      {
+        label: 'Tokens / second (avg)',
+        value:
+          typeof tokensPerSecond === 'number'
+            ? formatRate(tokensPerSecond, 'tok/s')
+            : 'N/A',
+        detail:
+          typeof lastTokensPerSecond === 'number'
+            ? `Last: ${formatRate(lastTokensPerSecond, 'tok/s')}`
+            : undefined,
+      },
+      {
+        label: 'Tokens / second (last)',
+        value:
+          typeof lastTokensPerSecond === 'number'
+            ? formatRate(lastTokensPerSecond, 'tok/s')
+            : 'N/A',
+        detail:
+          typeof tokensPerSecond === 'number'
+            ? `Avg: ${formatRate(tokensPerSecond, 'tok/s')}`
+            : undefined,
+        delta: tokensPerSecondDeltaInfo?.label,
+        deltaType: tokensPerSecondDeltaInfo?.type,
+      },
+      {
+        label: 'Response time (avg)',
+        value:
+          typeof averageResponseTimeMs === 'number'
+            ? formatMilliseconds(averageResponseTimeMs)
+            : 'N/A',
+        detail:
+          typeof lastResponseTimeMs === 'number'
+            ? `Last: ${formatMilliseconds(lastResponseTimeMs)}`
+            : undefined,
+      },
+      {
+        label: 'Response time (last)',
+        value:
+          typeof lastResponseTimeMs === 'number'
+            ? formatMilliseconds(lastResponseTimeMs)
+            : 'N/A',
+        detail:
+          typeof averageResponseTimeMs === 'number'
+            ? `Avg: ${formatMilliseconds(averageResponseTimeMs)}`
+            : undefined,
+        delta: responseTimeDeltaInfo?.label,
+        deltaType: responseTimeDeltaInfo?.type,
+      },
+      {
+        label: 'Context usage',
+        value: contextUsageValue,
+        detail: contextUsageDetail,
+      },
+    ]
 
   return (
     <div className="rounded-2xl border border-border/60 bg-card/70 p-1 shadow-sm">
