@@ -26,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { API_BASE_URL } from '@/lib/api'
 import { fetchModelInfo } from '@/lib/ollama'
 import { cn } from '@/lib/utils'
+import { Response } from '@/components/ui/shadcn-io/ai/response'
 
 export const Route = createFileRoute('/')({
   component: ChatPage,
@@ -223,41 +224,42 @@ function ChatPage() {
   )
 
   return (
-    <main className="flex h-screen w-full justify-center bg-muted/30 px-4 my-2">
+    <main className="flex min-h-screen w-full justify-center bg-muted/30 px-4 my-2">
       <div className="flex w-full max-w-5xl flex-col gap-6 h-full">
-        <section className="overflow-hidden rounded-xl border border-border/60 bg-card/80 p-4 shadow-xl sticky top-20 z-10 sm:top-20 hidden">
+        <section className="overflow-hidden rounded-xl border border-border/60 bg-card/80 p-4 backdrop-blur-md shadow-xl sticky top-4 z-10">
           <header className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-            <div className="max-w-xl space-y-2">
-              <div className="flex items-center gap-3">
-                <Badge variant="outline" className="rounded-full border-primary/60 bg-primary/10 text-primary">
-                  <Sparkles className="size-3.5" />
-                  Local AI Powered Chat
-                </Badge>
-                <div className="flex flex-col items-start">
-                  <Credenza open={credenzaOpen} onOpenChange={setCredenzaOpen}>
-                    <CredenzaTrigger asChild>
-                      <Button variant="ghost" size="icon-sm" aria-label="Session analytics">
-                        <Info className="size-4" />
-                      </Button>
-                    </CredenzaTrigger>
-                    <CredenzaContent className="md:max-w-4/5 lg:max-w-3/5">
-                      <CredenzaHeader>
-                        <CredenzaTitle>Session Analytics</CredenzaTitle>
-                      </CredenzaHeader>
-                      <CredenzaBody className='overflow-y-auto py-6'>
-                        <AnalyticsSummary analytics={analytics} />
-                      </CredenzaBody>
-                    </CredenzaContent>
-                  </Credenza>
-                </div>
-              </div>
+            <div className="max-w-xl">
+
               <div className="space-y-0">
-                <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                <h1 className="text-3xl font-medium tracking-tighter">
                   SSE Streaming Chat
                 </h1>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {hintText}
                 </p>
+                <div className="flex items-center gap-3">
+                  <Badge variant="outline" className="rounded-full border-primary/60 bg-primary/10 text-primary">
+                    <Sparkles className="size-3.5" />
+                    Local AI Powered Chat
+                  </Badge>
+                  <div className="flex flex-col items-start">
+                    <Credenza open={credenzaOpen} onOpenChange={setCredenzaOpen}>
+                      <CredenzaTrigger asChild>
+                        <Button variant="ghost" size="icon-sm" aria-label="Session analytics">
+                          <Info className="size-4" />
+                        </Button>
+                      </CredenzaTrigger>
+                      <CredenzaContent className="md:max-w-4/5 lg:max-w-3/5">
+                        <CredenzaHeader>
+                          <CredenzaTitle>Session Analytics</CredenzaTitle>
+                        </CredenzaHeader>
+                        <CredenzaBody className='overflow-y-auto py-6'>
+                          <AnalyticsSummary analytics={analytics} />
+                        </CredenzaBody>
+                      </CredenzaContent>
+                    </Credenza>
+                  </div>
+                </div>
               </div>
             </div>
           </header>
@@ -267,8 +269,8 @@ function ChatPage() {
 
         <Card className="flex shadow-none flex-1 flex-col border-0 backdrop-blur bg-transparent overflow-hidden">
           <CardContent className="flex flex-1 flex-col gap-4">
-            <ScrollArea className="flex-1 rounded-2xl overflow-auto pb-36 sm:pb-32">
-              <div className="flex min-h-80 flex-col gap-3 p-4 pb-40">
+            <ScrollArea className="flex-1 rounded-2xl overflow-auto pb-40">
+              <div className="flex min-h-80 flex-col gap-3">
                 {hasMessages ? (
                   messages.map((message, index) => (
                     <article
@@ -300,7 +302,7 @@ function ChatPage() {
                           </Tooltip>
                         )}
                       </div>
-                      <p className="whitespace-pre-wrap text-left text-sm leading-relaxed">{message.content}</p>
+                      <Response>{message.content}</Response>
                     </article>
                   ))
                 ) : (
@@ -313,14 +315,12 @@ function ChatPage() {
 
             {error && <p className="text-sm text-destructive">{error}</p>}
           </CardContent>
-
-          {/* Footer intentionally left empty; composer is positioned at fixed bottom */}
         </Card>
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center pointer-events-auto">
         <div className="w-full max-w-5xl px-4 m-2 sm:px-0">
-          <div className="mx-auto w-full">
+          <div className="mx-auto w-full backdrop-blur-md">
             <ChatComposer
               inputValue={input}
               onInputChange={setInput}
