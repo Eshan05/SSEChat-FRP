@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useRef, useState, lazy, Suspense, type ReactNode } from 'react'
 
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -26,13 +26,21 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { API_BASE_URL } from '@/lib/api'
 import { fetchModelInfo } from '@/lib/ollama'
 import { cn } from '@/lib/utils'
-import { Response } from '@/components/ui/shadcn-io/ai/response'
+
+// Lazy load the Response component to reduce initial bundle size
+const Response = lazy(() =>
+  import('@/components/ui/shadcn-io/ai/response').then(mod => ({ default: mod.Response }))
+)
 
 export const Route = createFileRoute('/')({
   component: ChatPage,
 })
 
-type UIMessage = Pick<ChatMessage, 'role' | 'content'>
+type UIMessage = Pick<ChatMessage, 'role' | 'content'> & {
+  id?: string
+  parentId?: string
+  branches?: string[]
+}
 
 type CompletionInfo = {
   model?: string
@@ -302,7 +310,9 @@ function ChatPage() {
                           </Tooltip>
                         )}
                       </div>
-                      <Response>{message.content}</Response>
+                      <Suspense fallback={<div className="animate-pulse text-sm text-muted-foreground">Loading...</div>}>
+                        <Response>{message.content}</Response>
+                      </Suspense>
                     </article>
                   ))
                 ) : (

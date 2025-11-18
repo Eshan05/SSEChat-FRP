@@ -87,6 +87,7 @@ const ollamaRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { model, messages } = parseResult.data;
+    // Messages now include optional id, parentId, and branches for conversation branching
     const upstreamAbort = new AbortController();
     const requestOrigin = request.headers.origin;
     fastify.log.debug({ origin: requestOrigin }, 'Incoming chat request Origin');
@@ -198,7 +199,14 @@ function* parseOllamaLine(line: string, logger: FastifyBaseLogger) {
     const parsed = JSON.parse(line);
 
     if (parsed.message?.content) {
-      yield { data: JSON.stringify({ content: parsed.message.content }) } satisfies SSEEvent;
+      yield {
+        data: JSON.stringify({
+          content: parsed.message.content,
+          // Include message metadata if present in the original message
+          id: (parsed.message as any)?.id,
+          parentId: (parsed.message as any)?.parentId,
+        })
+      } satisfies SSEEvent;
     }
 
     if (parsed.done) {

@@ -3,6 +3,9 @@ import { z } from "zod";
 export const ChatMessage = z.object({
   role: z.enum(["user", "assistant", "system"]),
   content: z.string(),
+  id: z.string().optional(),
+  parentId: z.string().optional(),
+  branches: z.array(z.string()).optional(),
 });
 
 export type ChatMessage = z.infer<typeof ChatMessage>;

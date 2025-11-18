@@ -1,10 +1,9 @@
 import type { ComponentProps, HTMLAttributes } from 'react';
-import { isValidElement, lazy, memo, Suspense } from 'react';
+import { isValidElement, lazy, memo, Suspense, useEffect, useState } from 'react';
 import ReactMarkdown, { type Options } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import 'katex/dist/katex.min.css';
 import hardenReactMarkdown from 'harden-react-markdown';
 import { cn } from '@/lib/utils';
 
@@ -371,6 +370,15 @@ export const Response = memo(
     parseIncompleteMarkdown: shouldParseIncompleteMarkdown = true,
     ...props
   }: ResponseProps) => {
+    // Lazy load KaTeX CSS only when Response component mounts
+    const [katexLoaded, setKatexLoaded] = useState(false);
+
+    useEffect(() => {
+      if (!katexLoaded) {
+        import('katex/dist/katex.min.css').then(() => setKatexLoaded(true));
+      }
+    }, [katexLoaded]);
+
     // Parse the children to remove incomplete markdown tokens if enabled
     const parsedChildren =
       typeof children === 'string' && shouldParseIncompleteMarkdown
