@@ -1,0 +1,45 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      # Point to the host machine's Ollama instance
+      # On Windows/Mac, host.docker.internal resolves to the host
+      - OLLAMA_BASE=http://host.docker.internal:11434
+    extra_hosts:
+      # Ensures host.docker.internal works on Linux as well
+      - "host.docker.internal:host-gateway"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+  # --- Optional: Dockerized Ollama ---
+  # Uncomment the section below if you want to run Ollama inside Docker 
+  # instead of using your local installation.
+  
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   # Enable GPU support if available (Linux/WSL2 only)
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: 1
+  #   #           capabilities: [gpu]
+
+# volumes:
+#   ollama_data:

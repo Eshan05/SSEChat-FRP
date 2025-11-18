@@ -7,7 +7,7 @@ import { once } from 'node:events';
 
 import { ChatRequest } from '@pkg/zod';
 
-const OLLAMA_BASE = 'http://127.0.0.1:11434';
+const OLLAMA_BASE = process.env.OLLAMA_BASE || 'http://127.0.0.1:11434';
 
 // 1. Axios Instance with Timeouts, Retries & Connection Pooling
 const axiosInstance = axios.create({
