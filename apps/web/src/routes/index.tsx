@@ -52,6 +52,11 @@ import {
   BranchNext,
   BranchPage,
 } from '@/components/ui/shadcn-io/ai/branch'
+import {
+  Reasoning,
+  ReasoningTrigger,
+  ReasoningContent,
+} from '@/components/ui/shadcn-io/ai/reasoning'
 
 // Lazy load the Response component to reduce initial bundle size
 const Response = lazy(() =>
@@ -147,11 +152,11 @@ function ChatPage() {
     if (mode === 'assistant-regenerate') {
       const targetAssistant = typeof options?.sourceIndex === 'number' ? activePath[options.sourceIndex] : undefined
       if (!targetAssistant || targetAssistant.role !== 'assistant') return
-      parentId = targetAssistant.parentId
+      parentId = targetAssistant.parentId!
     } else if (mode === 'user-regenerate') {
       const sourceUser = typeof options?.sourceIndex === 'number' ? activePath[options.sourceIndex] : undefined
       if (!sourceUser || sourceUser.role !== 'user') return
-      parentId = sourceUser.parentId
+      parentId = sourceUser.parentId!
     } else {
       // Standard: append to active leaf
       parentId = activeLeafId
@@ -238,7 +243,7 @@ function ChatPage() {
     // Reconstruct path for the API request
     // We can use the 'parentId' chain we just built.
     const conversationForApi: ChatMessage[] = []
-    let curr: string | undefined = assistantMessage.parentId
+    let curr: string | null | undefined = assistantMessage.parentId
     while (curr) {
       const msg = currentMessages.find(m => m.id === curr)
       if (msg) {
@@ -435,9 +440,9 @@ function ChatPage() {
       : (currentIndex - 1 + siblings.length) % siblings.length
 
     const nextMessage = siblings[nextIndex]
-    const parentId = nextMessage.parentId ?? 'root'
+    const parentId = nextMessage?.parentId ?? 'root'
 
-    setSelectedBranches(prev => ({ ...prev, [parentId]: nextMessage.id }))
+    setSelectedBranches(prev => ({ ...prev, [parentId]: nextMessage!.id }))
   }, [tree])
 
   const stopStreaming = useCallback(() => {
@@ -521,6 +526,12 @@ function ChatPage() {
                     const currentBranchIndex = siblings.findIndex(m => m.id === message.id)
                     const isEditing = editingIndex === index
 
+                    const { reasoning, content: displayContent } = parseMessageContent(message.content)
+                    const isLastMessage = index === activePath.length - 1
+                    const isMessageStreaming = isStreaming && isLastMessage && message.role === 'assistant'
+                    const info = messageInfo[message.id]
+                    const duration = info?.totalDuration ? info.totalDuration / 1e9 : undefined
+
                     return (
                       <article
                         key={message.id}
@@ -546,9 +557,11 @@ function ChatPage() {
                               autoFocus
                             />
                             <div className="flex gap-2">
-                              <Button size="sm" onClick={() => submitEditMessage(index)}>
-                                Save & Submit
-                              </Button>
+                              {message.role === 'user' && (
+                                <Button size="sm" onClick={() => submitEditMessage(index)}>
+                                  Save & Submit
+                                </Button>
+                              )}
                               <Button size="sm" variant="secondary" onClick={() => saveEditMessage(index)}>
                                 Save Only
                               </Button>
@@ -569,18 +582,32 @@ function ChatPage() {
                             }}
                           >
                             <BranchMessages>
-                              {siblings.map((branch) => (
-                                <Suspense
-                                  key={branch.id}
-                                  fallback={
-                                    <div className="animate-pulse text-sm text-muted-foreground">
-                                      Loading...
-                                    </div>
-                                  }
-                                >
-                                  <Response>{branch.content}</Response>
-                                </Suspense>
-                              ))}
+                              {siblings.map((branch) => {
+                                const { reasoning: branchReasoning, content: branchContent } = parseMessageContent(branch.content)
+                                const branchInfo = messageInfo[branch.id]
+                                const branchDuration = branchInfo?.totalDuration ? branchInfo.totalDuration / 1e9 : undefined
+                                const isBranchStreaming = isStreaming && branch.id === activeLeafId
+
+                                return (
+                                  <div key={branch.id}>
+                                    {branchReasoning && (
+                                      <Reasoning isStreaming={isBranchStreaming} duration={branchDuration}>
+                                        <ReasoningTrigger />
+                                        <ReasoningContent>{branchReasoning}</ReasoningContent>
+                                      </Reasoning>
+                                    )}
+                                    <Suspense
+                                      fallback={
+                                        <div className="animate-pulse text-sm text-muted-foreground">
+                                          Loading...
+                                        </div>
+                                      }
+                                    >
+                                      <Response>{branchContent}</Response>
+                                    </Suspense>
+                                  </div>
+                                )
+                              })}
                             </BranchMessages>
                             <BranchSelector from={message.role}>
                               <BranchPrevious />
@@ -589,21 +616,36 @@ function ChatPage() {
                             </BranchSelector>
                           </Branch>
                         ) : (
-                          <Suspense
-                            fallback={
-                              <div className="animate-pulse text-sm text-muted-foreground">
-                                Loading...
-                              </div>
-                            }
-                          >
-                            <Response>{message.content}</Response>
-                          </Suspense>
+                          <>
+                            {reasoning && (
+                              <Reasoning isStreaming={isMessageStreaming} duration={duration}>
+                                <ReasoningTrigger />
+                                <ReasoningContent>{reasoning}</ReasoningContent>
+                              </Reasoning>
+                            )}
+                            <Suspense
+                              fallback={
+                                <div className="animate-pulse text-sm text-muted-foreground">
+                                  Loading...
+                                </div>
+                              }
+                            >
+                              <Response>{displayContent}</Response>
+                            </Suspense>
+                          </>
                         )}
 
                         <Actions className="mt-3 flex-wrap">
                           <div className="flex items-center gap-1">
                             <Action
-                              tooltip={copiedIndex === index ? 'Copied!' : 'Copy'}
+                              tooltip="Copy as plain text"
+                              onClick={() => copyMessage(index, displayContent.replace(/[*_`~]/g, '').replace(/\n+/g, ' ').trim())}
+                              variant={copiedIndex === index ? 'secondary' : 'ghost'}
+                            >
+                              <Copy className="size-4" />
+                            </Action>
+                            <Action
+                              tooltip="Copy as markdown"
                               onClick={() => copyMessage(index, message.content)}
                               variant={copiedIndex === index ? 'secondary' : 'ghost'}
                             >
@@ -618,6 +660,20 @@ function ChatPage() {
                                 <Edit3 className="size-4" />
                               </Action>
                             )}
+                            {message.role === 'assistant' && (
+                              <Action
+                                tooltip="Edit response"
+                                onClick={() => startEditMessage(index, message.content)}
+                                disabled={isStreaming}
+                              >
+                                <Edit3 className="size-4" />
+                              </Action>
+                            )}
+                          </div>
+
+                          <Separator orientation="vertical" className="h-6 mx-1" />
+
+                          <div className="flex items-center gap-1">
                             {message.role === 'assistant' && (
                               <Action tooltip="Text-to-speech" onClick={() => { }}>
                                 <Volume2 className="size-4" />
@@ -669,10 +725,10 @@ function ChatPage() {
                                   </Action>
                                 </TooltipTrigger>
                                 <TooltipContent align="end" className="max-w-xs">
-                                  <ResponseDetails info={messageInfo[message.id]} />
+                                  <ResponseDetails info={messageInfo[message.id]!} />
                                 </TooltipContent>
                               </Tooltip>
-                            )}
+                            )}  
                             <Action
                               tooltip="Delete"
                               onClick={() => deleteMessage(index)}
@@ -1200,6 +1256,46 @@ function computeProgress(value: number | null, target: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
+}
+
+function parseMessageContent(content: string) {
+  const thinkTagStart = '<think>'
+  const thinkTagEnd = '</think>'
+  const thinkingTagStart = '[THINKING]'
+  const thinkingTagEnd = '[/THINKING]'
+
+  let reasoning: string | null = null
+  let displayContent = content
+
+  // Check for <think> tags first
+  const thinkStartIndex = content.indexOf(thinkTagStart)
+  if (thinkStartIndex !== -1) {
+    const thinkEndIndex = content.indexOf(thinkTagEnd, thinkStartIndex)
+    if (thinkEndIndex !== -1) {
+      reasoning = content.substring(thinkStartIndex + thinkTagStart.length, thinkEndIndex)
+      displayContent = content.substring(0, thinkStartIndex) + content.substring(thinkEndIndex + thinkTagEnd.length)
+    } else {
+      // Still thinking
+      reasoning = content.substring(thinkStartIndex + thinkTagStart.length)
+      displayContent = ''
+    }
+  } else {
+    // Check for [THINKING] tags
+    const thinkingStartIndex = content.indexOf(thinkingTagStart)
+    if (thinkingStartIndex !== -1) {
+      const thinkingEndIndex = content.indexOf(thinkingTagEnd, thinkingStartIndex)
+      if (thinkingEndIndex !== -1) {
+        reasoning = content.substring(thinkingStartIndex + thinkingTagStart.length, thinkingEndIndex)
+        displayContent = content.substring(0, thinkingStartIndex) + content.substring(thinkingEndIndex + thinkingTagEnd.length)
+      } else {
+        // Still thinking
+        reasoning = content.substring(thinkingStartIndex + thinkingTagStart.length)
+        displayContent = ''
+      }
+    }
+  }
+
+  return { reasoning, content: displayContent.trim() }
 }
 
 async function readErrorMessage(response: Response) {

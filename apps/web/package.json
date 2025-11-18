@@ -15,8 +15,6 @@
     "@icons-pack/react-simple-icons": "^13.8.0",
     "@pkg/types": "workspace:*",
     "@pkg/zod": "workspace:*",
-    "@radix-ui/react-select": "^2.2.6",
-    "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@tailwindcss/vite": "^4.0.6",
     "@tanstack/react-devtools": "^0.8.1",

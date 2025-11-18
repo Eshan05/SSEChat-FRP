@@ -70,11 +70,8 @@ export function getActiveLeaf(
   const roots = Array.from(tree.values()).filter(n => !n.parentId)
   if (roots.length === 0) return undefined
 
-  // If there are multiple roots (e.g. multiple system prompts or conversation starts),
-  // we need a way to select the root. For now, assume 'root' key in selectedBranches or default to first.
-  const rootId = selectedBranches['root'] ?? roots[0].id
-  let current = tree.get(rootId)
-
+  const rootId = selectedBranches['root'] ?? roots[0]?.id
+  let current = tree.get(rootId!)
   if (!current) return undefined
 
   while (true) {
@@ -82,18 +79,15 @@ export function getActiveLeaf(
       return current.id
     }
 
-    // Determine which child to follow
     const selectedChildId = selectedBranches[current.id]
     let nextNode: MessageNode | undefined
-
     if (selectedChildId) {
       nextNode = tree.get(selectedChildId)
     }
 
-    // If selection is invalid or not set, default to the last child (most recent)
     if (!nextNode) {
       const defaultChildId = current.children[current.children.length - 1]
-      nextNode = tree.get(defaultChildId)
+      nextNode = tree.get(defaultChildId!)
     }
 
     if (!nextNode) return current.id // Should not happen if children.length > 0
