@@ -87,6 +87,10 @@ const ollamaRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { model, messages } = parseResult.data;
+    
+    // Log the messages being sent to Ollama
+    fastify.log.info({ model, messageCount: messages.length, messages }, 'Sending chat request to Ollama');
+
     // Messages now include optional id, parentId, and branches for conversation branching
     const upstreamAbort = new AbortController();
     const requestOrigin = request.headers.origin;

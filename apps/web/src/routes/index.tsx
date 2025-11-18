@@ -57,6 +57,15 @@ import {
   ReasoningTrigger,
   ReasoningContent,
 } from '@/components/ui/shadcn-io/ai/reasoning'
+import {
+  CodeBlock,
+  CodeBlockBody,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+  CodeBlockFilename,
+  CodeBlockHeader,
+  CodeBlockItem,
+} from '@/components/ui/shadcn-io/code-block'
 
 // Lazy load the Response component to reduce initial bundle size
 const Response = lazy(() =>
@@ -466,6 +475,23 @@ function ChatPage() {
   })
 
   const [credenzaOpen, setCredenzaOpen] = useState(false)
+  const [contextPreviewOpen, setContextPreviewOpen] = useState(false)
+  const [contextPreviewData, setContextPreviewData] = useState<any[]>([])
+
+  const handleShowContext = useCallback(() => {
+    const currentInput = input.trim()
+    
+    // Construct the context that would be sent
+    const contextMessages = activePath.map(m => ({ role: m.role, content: m.content }))
+    
+    if (currentInput) {
+      contextMessages.push({ role: 'user', content: currentInput })
+    }
+    
+    setContextPreviewData(contextMessages)
+    setContextPreviewOpen(true)
+  }, [activePath, input])
+
   const analytics = useMemo(
     () => computeAnalytics(messageInfo, modelInfo?.contextLength ?? null),
     [messageInfo, modelInfo?.contextLength],
@@ -728,7 +754,7 @@ function ChatPage() {
                                   <ResponseDetails info={messageInfo[message.id]!} />
                                 </TooltipContent>
                               </Tooltip>
-                            )}  
+                            )}
                             <Action
                               tooltip="Delete"
                               onClick={() => deleteMessage(index)}
@@ -769,10 +795,46 @@ function ChatPage() {
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               modelInfo={modelInfo}
+              onShowContext={handleShowContext}
             />
           </div>
         </div>
       </div>
+
+      <Credenza open={contextPreviewOpen} onOpenChange={setContextPreviewOpen}>
+        <CredenzaContent className="md:max-w-3xl h-[80vh] flex flex-col">
+          <CredenzaHeader>
+            <CredenzaTitle>Context Preview</CredenzaTitle>
+          </CredenzaHeader>
+          <CredenzaBody className="flex-1 overflow-hidden p-0 min-h-0">
+            <div className="h-full overflow-auto p-4">
+              <CodeBlock
+                data={[{
+                  language: 'json',
+                  filename: 'context.json',
+                  code: JSON.stringify(contextPreviewData, null, 2)
+                }]}
+                defaultValue="json"
+                className="h-full"
+              >
+                <CodeBlockHeader>
+                  <CodeBlockFilename>context.json</CodeBlockFilename>
+                  <CodeBlockCopyButton />
+                </CodeBlockHeader>
+                <CodeBlockBody>
+                  {(item) => (
+                    <CodeBlockItem key={item.language} value={item.language}>
+                      <CodeBlockContent language="json">
+                        {item.code}
+                      </CodeBlockContent>
+                    </CodeBlockItem>
+                  )}
+                </CodeBlockBody>
+              </CodeBlock>
+            </div>
+          </CredenzaBody>
+        </CredenzaContent>
+      </Credenza>
     </main>
   )
 }

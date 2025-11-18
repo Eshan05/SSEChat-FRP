@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Check,
+  Eye,
   Loader2,
   Paperclip,
   Plus,
@@ -53,6 +54,7 @@ interface ChatComposerProps {
   attachments: File[]
   onAttachmentsChange: (files: File[]) => void
   modelInfo: OllamaModelInfo | null | undefined
+  onShowContext?: () => void
 }
 
 export function ChatComposer({
@@ -65,6 +67,7 @@ export function ChatComposer({
   attachments,
   onAttachmentsChange,
   modelInfo,
+  onShowContext,
 }: ChatComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [autoMode, setAutoMode] = useState(false)
@@ -223,6 +226,22 @@ export function ChatComposer({
           </div>
 
           <div className="flex items-center gap-2">
+            {onShowContext && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={onShowContext}
+                  >
+                    <Eye className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>View context</TooltipContent>
+              </Tooltip>
+            )}
             {isStreaming && (
               <Button
                 type="button"
