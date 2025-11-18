@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, lazy, Suspense, type ReactNode } from 'react'
+import { useCallback, useMemo, useRef, useState, lazy, Suspense } from 'react'
 
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -29,14 +29,13 @@ import {
   CredenzaBody,
 } from '@/components/ui/credenza'
 import { Card, CardContent } from '@/components/ui/card'
-import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Actions, Action } from '@/components/ui/shadcn-io/ai/actions'
-import { API_BASE_URL } from '@/lib/api'
+import { API_BASE_URL, consumeEventStream, readErrorMessage } from '@/lib/api'
 import { fetchModelInfo } from '@/lib/ollama'
-import { cn } from '@/lib/utils'
+import { cn, parseMessageContent } from '@/lib/utils'
 import {
   buildMessageTree,
   getActiveLeaf,
@@ -57,61 +56,23 @@ import {
   ReasoningTrigger,
   ReasoningContent,
 } from '@/components/ui/shadcn-io/ai/reasoning'
-import {
-  CodeBlock,
-  CodeBlockBody,
-  CodeBlockContent,
-  CodeBlockCopyButton,
-  CodeBlockFilename,
-  CodeBlockHeader,
-  CodeBlockItem,
-} from '@/components/ui/shadcn-io/code-block'
+import { CompletionInfo, StreamEventPayload } from '@/lib/chat-types'
+import { computeAnalytics } from '@/lib/analytics'
+import { Skeleton } from '@/components/ui/skeleton'
 
-// Lazy load the Response component to reduce initial bundle size
+// Lazy load components
 const Response = lazy(() =>
   import('@/components/ui/shadcn-io/ai/response').then(mod => ({ default: mod.Response }))
 )
+const ResponseDetails = lazy(() => import('@/components/ResponseDetails'))
+const AnalyticsSummary = lazy(() => import('@/components/AnalyticsSummary'))
+const ContextPreview = lazy(() => import('@/components/ContextPreview'))
 
 export const Route = createFileRoute('/')({
   component: ChatPage,
 })
 
-type CompletionInfo = {
-  model?: string
-  doneReason?: string
-  totalDuration?: number
-  loadDuration?: number
-  promptEvalCount?: number
-  promptEvalDuration?: number
-  evalCount?: number
-  evalDuration?: number
-  responseTimeMs?: number
-  tokensPerSecond?: number
-}
 
-type StreamEventPayload = {
-  content?: string
-  error?: string
-  done?: boolean
-  done_reason?: string
-  total_duration?: number
-  load_duration?: number
-  prompt_eval_count?: number
-  prompt_eval_duration?: number
-  eval_count?: number
-  eval_duration?: number
-  model?: string
-  message?: {
-    role?: string
-    content?: string
-  }
-}
-
-const integerFormatter = new Intl.NumberFormat()
-const decimalFormatter = new Intl.NumberFormat(undefined, {
-  maximumFractionDigits: 1,
-  minimumFractionDigits: 0,
-})
 
 function ChatPage() {
   const { model: selectedModel } = useSelectedModel()
@@ -528,7 +489,9 @@ function ChatPage() {
                           <CredenzaTitle>Session Analytics</CredenzaTitle>
                         </CredenzaHeader>
                         <CredenzaBody className='overflow-y-auto py-6'>
-                          <AnalyticsSummary analytics={analytics} />
+                          <Suspense fallback={<Skeleton className="h-64 w-full" />}>
+                            <AnalyticsSummary analytics={analytics} />
+                          </Suspense>
                         </CredenzaBody>
                       </CredenzaContent>
                     </Credenza>
@@ -751,7 +714,9 @@ function ChatPage() {
                                   </Action>
                                 </TooltipTrigger>
                                 <TooltipContent align="end" className="max-w-xs">
-                                  <ResponseDetails info={messageInfo[message.id]!} />
+                                  <Suspense fallback={<Skeleton className="h-20 w-40" />}>
+                                    <ResponseDetails info={messageInfo[message.id]!} />
+                                  </Suspense>
                                 </TooltipContent>
                               </Tooltip>
                             )}
@@ -808,29 +773,9 @@ function ChatPage() {
           </CredenzaHeader>
           <CredenzaBody className="flex-1 overflow-hidden p-0 min-h-0">
             <div className="h-full overflow-auto p-4">
-              <CodeBlock
-                data={[{
-                  language: 'json',
-                  filename: 'context.json',
-                  code: JSON.stringify(contextPreviewData, null, 2)
-                }]}
-                defaultValue="json"
-                className="h-full"
-              >
-                <CodeBlockHeader>
-                  <CodeBlockFilename>context.json</CodeBlockFilename>
-                  <CodeBlockCopyButton />
-                </CodeBlockHeader>
-                <CodeBlockBody>
-                  {(item) => (
-                    <CodeBlockItem key={item.language} value={item.language}>
-                      <CodeBlockContent language="json">
-                        {item.code}
-                      </CodeBlockContent>
-                    </CodeBlockItem>
-                  )}
-                </CodeBlockBody>
-              </CodeBlock>
+              <Suspense fallback={<Skeleton className="h-full w-full" />}>
+                <ContextPreview data={contextPreviewData} />
+              </Suspense>
             </div>
           </CredenzaBody>
         </CredenzaContent>
@@ -839,617 +784,3 @@ function ChatPage() {
   )
 }
 
-function ResponseDetails({ info }: { info: CompletionInfo }) {
-  const totalTokens = (info.promptEvalCount ?? 0) + (info.evalCount ?? 0)
-  const tokensPerSecond =
-    typeof info.tokensPerSecond === 'number' && Number.isFinite(info.tokensPerSecond)
-      ? info.tokensPerSecond
-      : undefined
-  const responseTime =
-    typeof info.responseTimeMs === 'number' && info.responseTimeMs > 0
-      ? info.responseTimeMs
-      : typeof info.totalDuration === 'number' && info.totalDuration > 0
-        ? info.totalDuration / 1e6
-        : undefined
-
-  const fields: Array<{ label: string; value: string }> = [
-    { label: 'Model', value: info.model ?? 'N/A' },
-    {
-      label: 'Response time',
-      value: responseTime ? formatMilliseconds(responseTime) : 'N/A',
-    },
-    { label: 'Input tokens', value: formatTokens(info.promptEvalCount) },
-    { label: 'Output tokens', value: formatTokens(info.evalCount) },
-    { label: 'Total tokens', value: formatTokens(totalTokens) },
-    {
-      label: 'Tokens / second',
-      value: tokensPerSecond ? formatRate(tokensPerSecond, 'tok/s') : 'N/A',
-    },
-    { label: 'Done reason', value: info.doneReason ?? 'N/A' },
-    { label: 'Total duration', value: formatDuration(info.totalDuration) },
-    { label: 'Load duration', value: formatDuration(info.loadDuration) },
-    {
-      label: 'Prompt tokens',
-      value: formatCountWithDuration(info.promptEvalCount, info.promptEvalDuration),
-    },
-    {
-      label: 'Response tokens',
-      value: formatCountWithDuration(info.evalCount, info.evalDuration),
-    },
-  ]
-
-  return (
-    <div className="grid gap-1 text-xs">
-      {fields.map((field) => (
-        <div key={field.label} className="flex items-center justify-between gap-4">
-          <span className="text-muted-foreground">{field.label}</span>
-          <span className="font-medium text-foreground">{field.value}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function formatDuration(value?: number) {
-  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
-    return 'N/A'
-  }
-
-  const seconds = value / 1e9
-  if (seconds >= 1) {
-    return `${seconds.toFixed(2)} s`
-  }
-
-  const milliseconds = seconds * 1e3
-  if (milliseconds >= 1) {
-    return `${milliseconds.toFixed(1)} ms`
-  }
-
-  const microseconds = seconds * 1e6
-  if (microseconds >= 1) {
-    return `${microseconds.toFixed(1)} us`
-  }
-
-  return `${value.toFixed(0)} ns`
-}
-
-function formatCountWithDuration(count?: number, duration?: number) {
-  if (typeof count !== 'number') {
-    return 'N/A'
-  }
-
-  const formattedCount = integerFormatter.format(count)
-  if (typeof duration === 'number' && duration > 0) {
-    return `${formattedCount} (${formatDuration(duration)})`
-  }
-
-  return formattedCount
-}
-
-function formatTokens(value?: number) {
-  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
-    return 'N/A'
-  }
-
-  return integerFormatter.format(value)
-}
-
-function formatMilliseconds(value: number) {
-  if (value >= 1000) {
-    return `${(value / 1000).toFixed(2)} s`
-  }
-
-  if (value >= 1) {
-    return `${value.toFixed(0)} ms`
-  }
-
-  return `${(value * 1000).toFixed(0)} us`
-}
-
-function formatRate(value: number, unit: string) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return 'N/A'
-  }
-
-  if (value >= 100) {
-    return `${value.toFixed(0)} ${unit}`
-  }
-
-  if (value >= 10) {
-    return `${value.toFixed(1)} ${unit}`
-  }
-
-  return `${value.toFixed(2)} ${unit}`
-}
-
-function formatPercentage(value?: number) {
-  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
-    return 'N/A'
-  }
-
-  if (value === 0) {
-    return '0%'
-  }
-
-  if (value >= 100) {
-    return `${value.toFixed(1)}%`
-  }
-
-  if (value >= 1) {
-    return `${value.toFixed(1)}%`
-  }
-
-  return `${value.toFixed(2)}%`
-}
-
-type SessionAnalytics = {
-  totalMessages: number
-  promptTokens: number
-  totalOutputTokens: number
-  contextTokens: number
-  averageTokensPerMessage?: number
-  tokensPerSecond?: number
-  lastTokensPerSecond?: number
-  averageResponseTimeMs?: number
-  lastResponseTimeMs?: number
-  contextWindow: number | null
-  contextUsagePercent?: number
-}
-
-function computeAnalytics(
-  infoRecord: Record<string, CompletionInfo>,
-  contextWindow: number | null,
-): SessionAnalytics {
-  const sorted = Object.entries(infoRecord)
-    .map(([id, info]) => ({ id, info }))
-    .filter((entry) => entry.info)
-  // We can't easily sort by index anymore since we use IDs. 
-  // But for analytics, maybe order doesn't matter as much, or we can rely on insertion order if JS object preserves it (mostly yes).
-  // Or we could add a timestamp to CompletionInfo.
-  // For now, let's just use the values.
-
-  const lastEntry = sorted.length > 0 ? sorted[sorted.length - 1] : undefined
-  const lastInfo = lastEntry?.info
-  const promptTokens = typeof lastInfo?.promptEvalCount === 'number' ? lastInfo.promptEvalCount : 0
-  const lastOutputTokens = typeof lastInfo?.evalCount === 'number' ? lastInfo.evalCount : 0
-  const totalOutputTokens = sorted.reduce((sum, entry) => {
-    return sum + (entry.info.evalCount ?? 0)
-  }, 0)
-  const contextTokens = promptTokens + lastOutputTokens
-
-  const totalEvalDurationSeconds = sorted.reduce((sum, entry) => {
-    const { evalDuration } = entry.info
-    if (typeof evalDuration === 'number' && evalDuration > 0) {
-      return sum + evalDuration / 1e9
-    }
-    return sum
-  }, 0)
-
-  const tokensPerSecond =
-    totalEvalDurationSeconds > 0 && totalOutputTokens > 0
-      ? totalOutputTokens / totalEvalDurationSeconds
-      : undefined
-
-  const lastTokensPerSecond =
-    lastInfo && typeof lastInfo.evalDuration === 'number' && lastInfo.evalDuration > 0 && typeof lastInfo.evalCount === 'number'
-      ? lastInfo.evalCount / (lastInfo.evalDuration / 1e9)
-      : undefined
-
-  const responseTimes = sorted
-    .map(({ info }) => {
-      if (typeof info.responseTimeMs === 'number' && info.responseTimeMs > 0) {
-        return info.responseTimeMs
-      }
-      if (typeof info.totalDuration === 'number' && info.totalDuration > 0) {
-        return info.totalDuration / 1e6
-      }
-      return undefined
-    })
-    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-
-  const averageResponseTimeMs = responseTimes.length
-    ? responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length
-    : undefined
-
-  const lastResponseTimeMs = responseTimes.length
-    ? responseTimes[responseTimes.length - 1]
-    : undefined
-
-  const averageTokensPerMessage =
-    sorted.length > 0 ? totalOutputTokens / sorted.length : undefined
-
-  const contextUsagePercent =
-    contextWindow && contextWindow > 0
-      ? (contextTokens / contextWindow) * 100
-      : undefined
-
-  return {
-    totalMessages: sorted.length,
-    promptTokens,
-    totalOutputTokens,
-    contextTokens,
-    averageTokensPerMessage,
-    tokensPerSecond,
-    lastTokensPerSecond,
-    averageResponseTimeMs,
-    lastResponseTimeMs,
-    contextWindow: contextWindow ?? null,
-    contextUsagePercent,
-  }
-}
-
-function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
-  const {
-    promptTokens,
-    totalOutputTokens,
-    contextTokens,
-    averageTokensPerMessage,
-    tokensPerSecond,
-    lastTokensPerSecond,
-    averageResponseTimeMs,
-    lastResponseTimeMs,
-    contextWindow,
-    contextUsagePercent,
-    totalMessages,
-  } = analytics
-
-  const tokenRateAverage = numericOrNull(tokensPerSecond)
-  const tokenRateLast = numericOrNull(lastTokensPerSecond)
-  const tokenRateProgress = computeProgress(tokenRateAverage ?? tokenRateLast, TOKEN_RATE_TARGET)
-  const tokenRateDelta = describeDelta(tokenRateAverage, tokenRateLast)
-
-  const responseAverage = numericOrNull(averageResponseTimeMs)
-  const responseLast = numericOrNull(lastResponseTimeMs)
-  const responseProgress = computeProgress(responseAverage ?? responseLast, RESPONSE_TARGET_MS)
-  const responseDelta = describeDelta(responseAverage, responseLast, { inverse: true })
-
-  const contextPercentRaw = numericOrNull(contextUsagePercent)
-  const contextPercent = contextPercentRaw != null ? clamp(contextPercentRaw, 0, 100) : null
-  const averageTokensDisplay =
-    typeof averageTokensPerMessage === 'number' && Number.isFinite(averageTokensPerMessage)
-      ? decimalFormatter.format(averageTokensPerMessage)
-      : 'N/A'
-
-  const contextLimit = typeof contextWindow === 'number' && contextWindow > 0 ? contextWindow : null
-
-  return (
-    <div className="overflow-hidden rounded-3xl border border-border/60 bg-muted/40">
-      <div className="grid grid-cols-1 gap-px bg-border/60 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile className="lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wide text-muted-foreground">Token throughput</span>
-            <span className="text-xs uppercase tracking-wide text-muted-foreground"></span>
-          </div>
-          <div className="text-2xl font-semibold text-foreground">
-            {tokenRateAverage != null ? formatRate(tokenRateAverage, 'tok/s') : 'N/A'}
-          </div>
-          <Progress value={tokenRateProgress} className="h-1.5 bg-muted" />
-          <div className="flex items-center justify-between text-xs -mt-1 uppercase tracking-wide text-muted-foreground">
-            <span>0</span>
-            <span>200</span>
-          </div>
-          <div className="mt-2 space-y-1 text-xs">
-            <div className="flex items-center justify-between text-muted-foreground">
-              <span>Average</span>
-              <span className="text-foreground">
-                {tokenRateAverage != null ? formatRate(tokenRateAverage, 'tok/s') : 'N/A'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-muted-foreground">
-              <span className="flex items-center gap-2">
-                Last
-                {tokenRateDelta && (
-                  <span className={cn('font-medium', deltaVariantClass(tokenRateDelta.variant))}>
-                    {tokenRateDelta.label}
-                  </span>
-                )}
-              </span>
-              <span className="text-foreground">
-                {tokenRateLast != null ? formatRate(tokenRateLast, 'tok/s') : 'N/A'}
-              </span>
-            </div>
-          </div>
-        </StatTile>
-
-        <StatTile className="lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wide text-muted-foreground">Response latency</span>
-            <span className="text-xs uppercase tracking-wide text-muted-foreground"></span>
-          </div>
-          <div className="text-2xl font-semibold text-foreground">
-            {responseAverage != null ? formatMilliseconds(responseAverage) : 'N/A'}
-          </div>
-          <Progress value={responseProgress} className="h-1.5 bg-muted" />
-          <div className="flex items-center justify-between -mt-1 text-xs uppercase tracking-wide text-muted-foreground">
-            <span>0</span>
-            <span>{formatMilliseconds(RESPONSE_TARGET_MS)}</span>
-          </div>
-          <div className="mt-2 space-y-1 text-xs">
-            <div className="flex items-center justify-between text-muted-foreground">
-              <span>Average</span>
-              <span className="text-foreground">
-                {responseAverage != null ? formatMilliseconds(responseAverage) : 'N/A'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-muted-foreground">
-              <span className="flex items-center gap-2">
-                Last
-                {responseDelta && (
-                  <span className={cn('font-medium', deltaVariantClass(responseDelta.variant))}>
-                    {responseDelta.label}
-                  </span>
-                )}
-              </span>
-              <span className="text-foreground">
-                {responseLast != null ? formatMilliseconds(responseLast) : 'N/A'}
-              </span>
-            </div>
-          </div>
-        </StatTile>
-
-        <StatTile>
-          <span className="text-xs uppercase tracking-wide text-muted-foreground">Prompt tokens</span>
-          <span className="text-xs text-muted-foreground -mt-2">
-            Average tokens / M:{' '}
-            <span className="text-foreground">{averageTokensDisplay}</span>
-          </span>
-          <span className="text-2xl font-semibold text-foreground">{formatTokens(promptTokens)}</span>
-        </StatTile>
-
-        <StatTile>
-          <span className="text-xs uppercase tracking-wide text-muted-foreground">Output tokens</span>
-          <span className="text-xs text-muted-foreground -mt-2">
-            Total turns:{' '}
-            <span className="text-foreground">{totalMessages}</span>
-          </span>
-          <span className="text-2xl font-semibold text-foreground">{formatTokens(totalOutputTokens)}</span>
-        </StatTile>
-
-        <StatTile className="lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wide text-muted-foreground">Context usage</span>
-            <span className="text-xs font-medium text-muted-foreground">
-              {contextPercent != null ? formatPercentage(contextPercent) : 'N/A'}
-            </span>
-          </div>
-          <div className="text-2xl font-semibold text-foreground">
-            {contextPercent != null ? formatPercentage(contextPercent) : 'N/A'}
-          </div>
-          <Progress value={contextPercent ?? 0} className="h-1.5 bg-muted" />
-          <div className="flex items-center justify-between text-xs uppercase tracking-wide text-muted-foreground -mt-1">
-            <span>0 tokens</span>
-            <span>
-              {contextLimit ? `${formatTokens(contextLimit)} limit` : 'Window unknown'}
-            </span>
-          </div>
-          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-            <div className="flex items-center justify-between">
-              <span>Context Tokens / Max</span>
-              <span className="text-foreground">
-                {contextLimit ? `${formatTokens(contextTokens)} / ${formatTokens(contextLimit)}` : formatTokens(contextTokens)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Prompt</span>
-              <span className="text-foreground">{formatTokens(promptTokens)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Output</span>
-              <span className="text-foreground">{formatTokens(totalOutputTokens)}</span>
-            </div>
-          </div>
-        </StatTile>
-      </div>
-    </div>
-  )
-}
-
-const TOKEN_RATE_TARGET = 200
-const RESPONSE_TARGET_MS = 2000
-
-type DeltaVariant = 'positive' | 'negative' | 'neutral'
-
-function describeDelta(
-  baseline: number | null,
-  comparison: number | null,
-  options: { inverse?: boolean } = {},
-): { label: string; variant: DeltaVariant } | null {
-  const { inverse = false } = options
-  if (
-    baseline == null ||
-    comparison == null ||
-    !Number.isFinite(baseline) ||
-    !Number.isFinite(comparison) ||
-    baseline === 0
-  ) {
-    return null
-  }
-
-  const delta = comparison - baseline
-  const percent = (delta / baseline) * 100
-
-  if (!Number.isFinite(percent)) {
-    return null
-  }
-
-  const arrow = delta === 0 ? '→' : delta > 0 ? '↑' : '↓'
-  const formattedPercent = Math.abs(percent) >= 10 ? percent.toFixed(1) : percent.toFixed(2)
-  const label = `${arrow} ${delta > 0 ? '+' : ''}${formattedPercent}%`
-  let variant: DeltaVariant = 'neutral'
-
-  if (delta !== 0) {
-    const improvement = inverse ? delta <= 0 : delta >= 0
-    variant = improvement ? 'positive' : 'negative'
-  }
-
-  return { label, variant }
-}
-
-function deltaVariantClass(variant: DeltaVariant) {
-  switch (variant) {
-    case 'positive':
-      return 'text-emerald-500'
-    case 'negative':
-      return 'text-red-500'
-    default:
-      return 'text-muted-foreground'
-  }
-}
-
-function StatTile({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <div className={cn('flex flex-col gap-3 bg-background/90 p-4 sm:p-6', className)}>
-      {children}
-    </div>
-  )
-}
-
-function numericOrNull(value?: number) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function computeProgress(value: number | null, target: number) {
-  if (value == null || !Number.isFinite(value) || target <= 0) {
-    return 0
-  }
-
-  return clamp((value / target) * 100, 0, 100)
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
-}
-
-function parseMessageContent(content: string) {
-  const thinkTagStart = '<think>'
-  const thinkTagEnd = '</think>'
-  const thinkingTagStart = '[THINKING]'
-  const thinkingTagEnd = '[/THINKING]'
-
-  let reasoning: string | null = null
-  let displayContent = content
-
-  // Check for <think> tags first
-  const thinkStartIndex = content.indexOf(thinkTagStart)
-  if (thinkStartIndex !== -1) {
-    const thinkEndIndex = content.indexOf(thinkTagEnd, thinkStartIndex)
-    if (thinkEndIndex !== -1) {
-      reasoning = content.substring(thinkStartIndex + thinkTagStart.length, thinkEndIndex)
-      displayContent = content.substring(0, thinkStartIndex) + content.substring(thinkEndIndex + thinkTagEnd.length)
-    } else {
-      // Still thinking
-      reasoning = content.substring(thinkStartIndex + thinkTagStart.length)
-      displayContent = ''
-    }
-  } else {
-    // Check for [THINKING] tags
-    const thinkingStartIndex = content.indexOf(thinkingTagStart)
-    if (thinkingStartIndex !== -1) {
-      const thinkingEndIndex = content.indexOf(thinkingTagEnd, thinkingStartIndex)
-      if (thinkingEndIndex !== -1) {
-        reasoning = content.substring(thinkingStartIndex + thinkingTagStart.length, thinkingEndIndex)
-        displayContent = content.substring(0, thinkingStartIndex) + content.substring(thinkingEndIndex + thinkingTagEnd.length)
-      } else {
-        // Still thinking
-        reasoning = content.substring(thinkingStartIndex + thinkingTagStart.length)
-        displayContent = ''
-      }
-    }
-  }
-
-  return { reasoning, content: displayContent.trim() }
-}
-
-async function readErrorMessage(response: Response) {
-  try {
-    const payload = await response.json()
-    return payload?.error ?? response.statusText
-  } catch {
-    return response.statusText || 'Request failed'
-  }
-}
-
-async function consumeEventStream(
-  stream: ReadableStream<Uint8Array>,
-  onContent: (delta: string) => void,
-  onServerError: (message: string) => void,
-  onComplete?: (payload: StreamEventPayload) => void,
-) {
-  const reader = stream.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-
-    let boundary = buffer.indexOf('\n\n')
-    while (boundary !== -1) {
-      const rawEvent = buffer.slice(0, boundary).trim()
-      buffer = buffer.slice(boundary + 2)
-
-      const data = extractEventData(rawEvent)
-      if (!data) {
-        boundary = buffer.indexOf('\n\n')
-        continue
-      }
-
-      if (data === '[DONE]') {
-        return
-      }
-
-      try {
-        const payload = JSON.parse(data) as StreamEventPayload
-
-        if (payload.error) {
-          onServerError(payload.error)
-          return
-        }
-
-        const delta = payload.content ?? payload.message?.content
-        if (delta) {
-          onContent(delta)
-        }
-
-        if (payload.done) {
-          onComplete?.(payload)
-          return
-        }
-      } catch {
-        // Ignore malformed SSE payloads
-      }
-
-      boundary = buffer.indexOf('\n\n')
-    }
-  }
-
-  const trailingData = extractEventData(buffer.trim())
-  if (trailingData && trailingData !== '[DONE]') {
-    try {
-      const payload = JSON.parse(trailingData) as StreamEventPayload
-      if (payload.error) {
-        onServerError(payload.error)
-      } else {
-        const delta = payload.content ?? payload.message?.content
-        if (delta) {
-          onContent(delta)
-        }
-      }
-
-      if (payload.done) {
-        onComplete?.(payload)
-      }
-    } catch {
-      // Ignore trailing garbage
-    }
-  }
-}
-
-function extractEventData(eventChunk: string) {
-  return eventChunk
-    .split('\n')
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.replace(/^data:\s*/, ''))
-    .join('\n')
-}
