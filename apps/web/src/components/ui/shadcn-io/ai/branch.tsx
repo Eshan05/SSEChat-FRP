@@ -42,6 +42,10 @@ export const Branch = ({
   const [currentBranch, setCurrentBranch] = useState(defaultBranch);
   const [branches, setBranches] = useState<ReactElement[]>([]);
 
+  useEffect(() => {
+    setCurrentBranch(defaultBranch);
+  }, [defaultBranch]);
+
   const handleBranchChange = (newBranch: number) => {
     setCurrentBranch(newBranch);
     onBranchChange?.(newBranch);

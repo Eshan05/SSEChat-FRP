@@ -1,13 +1,7 @@
-/**
- * Utility functions for managing conversation branching
- */
+import type { ChatMessage } from '@pkg/zod'
 
-export type MessageNode = {
-  id: string
-  parentId?: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  branches: string[]
+export type MessageNode = ChatMessage & {
+  children: string[]
 }
 
 /**
@@ -18,29 +12,23 @@ export function generateMessageId(): string {
 }
 
 /**
- * Build a tree structure from flat message list
+ * Build a map of ID -> MessageNode from a flat list of messages.
+ * This also populates the 'children' array for each node based on parentId relationships.
  */
-export function buildMessageTree(messages: Array<{ id?: string; parentId?: string; role: string; content: string }>): Map<string, MessageNode> {
+export function buildMessageTree(messages: ChatMessage[]): Map<string, MessageNode> {
   const tree = new Map<string, MessageNode>()
 
-  messages.forEach((msg, index) => {
-    const id = msg.id ?? `msg_${index}`
-    const node: MessageNode = {
-      id,
-      parentId: msg.parentId,
-      role: msg.role as 'user' | 'assistant' | 'system',
-      content: msg.content,
-      branches: [],
-    }
-    tree.set(id, node)
+  // First pass: Create nodes
+  messages.forEach((msg) => {
+    tree.set(msg.id, { ...msg, children: [] })
   })
 
-  // Build parent-child relationships
-  tree.forEach((node) => {
-    if (node.parentId) {
-      const parent = tree.get(node.parentId)
-      if (parent && !parent.branches.includes(node.id)) {
-        parent.branches.push(node.id)
+  // Second pass: Link children
+  messages.forEach((msg) => {
+    if (msg.parentId) {
+      const parent = tree.get(msg.parentId)
+      if (parent) {
+        parent.children.push(msg.id)
       }
     }
   })
@@ -49,9 +37,12 @@ export function buildMessageTree(messages: Array<{ id?: string; parentId?: strin
 }
 
 /**
- * Get the linear path from root to a specific message
+ * Get the linear path from root to a specific message (inclusive).
+ * This is the context sent to the LLM.
  */
-export function getMessagePath(tree: Map<string, MessageNode>, targetId: string): MessageNode[] {
+export function getMessagePath(tree: Map<string, MessageNode>, targetId: string | undefined): MessageNode[] {
+  if (!targetId) return []
+
   const path: MessageNode[] = []
   let currentId: string | undefined = targetId
 
@@ -59,31 +50,73 @@ export function getMessagePath(tree: Map<string, MessageNode>, targetId: string)
     const node = tree.get(currentId)
     if (!node) break
     path.unshift(node)
-    currentId = node.parentId
+    currentId = node.parentId ?? undefined
   }
 
   return path
 }
 
 /**
- * Get all branches for a specific message
+ * Find the leaf node for a given branch selection state.
+ * 
+ * @param tree The message tree
+ * @param selectedBranches A map of parentId -> selectedChildId
  */
-export function getMessageBranches(tree: Map<string, MessageNode>, messageId: string): MessageNode[] {
-  const node = tree.get(messageId)
-  if (!node) return []
+export function getActiveLeaf(
+  tree: Map<string, MessageNode>,
+  selectedBranches: Record<string, string>
+): string | undefined {
+  // Find root(s)
+  const roots = Array.from(tree.values()).filter(n => !n.parentId)
+  if (roots.length === 0) return undefined
 
-  return node.branches.map(branchId => tree.get(branchId)).filter((n): n is MessageNode => n !== undefined)
+  // If there are multiple roots (e.g. multiple system prompts or conversation starts),
+  // we need a way to select the root. For now, assume 'root' key in selectedBranches or default to first.
+  const rootId = selectedBranches['root'] ?? roots[0].id
+  let current = tree.get(rootId)
+
+  if (!current) return undefined
+
+  while (true) {
+    if (current.children.length === 0) {
+      return current.id
+    }
+
+    // Determine which child to follow
+    const selectedChildId = selectedBranches[current.id]
+    let nextNode: MessageNode | undefined
+
+    if (selectedChildId) {
+      nextNode = tree.get(selectedChildId)
+    }
+
+    // If selection is invalid or not set, default to the last child (most recent)
+    if (!nextNode) {
+      const defaultChildId = current.children[current.children.length - 1]
+      nextNode = tree.get(defaultChildId)
+    }
+
+    if (!nextNode) return current.id // Should not happen if children.length > 0
+    current = nextNode
+  }
 }
 
 /**
- * Create a new branch from a parent message
+ * Get siblings of a message (including itself)
  */
-export function createBranch(parentId: string, role: 'user' | 'assistant' | 'system', content: string): MessageNode {
-  return {
-    id: generateMessageId(),
-    parentId,
-    role,
-    content,
-    branches: [],
+export function getSiblings(tree: Map<string, MessageNode>, messageId: string): MessageNode[] {
+  const node = tree.get(messageId)
+  if (!node) return []
+
+  if (!node.parentId) {
+    // Root siblings
+    return Array.from(tree.values()).filter(n => !n.parentId)
   }
+
+  const parent = tree.get(node.parentId)
+  if (!parent) return [node]
+
+  return parent.children
+    .map(id => tree.get(id))
+    .filter((n): n is MessageNode => n !== undefined)
 }

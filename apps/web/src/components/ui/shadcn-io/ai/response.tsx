@@ -7,7 +7,6 @@ import remarkMath from 'remark-math';
 import hardenReactMarkdown from 'harden-react-markdown';
 import { cn } from '@/lib/utils';
 
-// Lazy load heavy syntax highlighter components
 const CodeBlockLazy = lazy(() =>
   import('./code-block').then((mod) => ({ default: mod.CodeBlock }))
 );

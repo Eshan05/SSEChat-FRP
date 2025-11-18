@@ -3,8 +3,17 @@ import { useCallback, useMemo, useRef, useState, lazy, Suspense, type ReactNode 
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 
-import { Info, Radio, Sparkles } from 'lucide-react'
-import ModelName from '@/components/ModelName'
+import {
+  Info,
+  Sparkles,
+  Copy,
+  RefreshCcw,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Volume2,
+  Edit3,
+} from 'lucide-react'
 import type { ChatMessage } from '@pkg/zod'
 
 import { ChatComposer } from '@/components/ChatComposer'
@@ -22,10 +31,27 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Actions, Action } from '@/components/ui/shadcn-io/ai/actions'
 import { API_BASE_URL } from '@/lib/api'
 import { fetchModelInfo } from '@/lib/ollama'
 import { cn } from '@/lib/utils'
+import {
+  buildMessageTree,
+  getActiveLeaf,
+  getMessagePath,
+  getSiblings,
+  generateMessageId
+} from '@/lib/message-tree'
+import {
+  Branch,
+  BranchMessages,
+  BranchSelector,
+  BranchPrevious,
+  BranchNext,
+  BranchPage,
+} from '@/components/ui/shadcn-io/ai/branch'
 
 // Lazy load the Response component to reduce initial bundle size
 const Response = lazy(() =>
@@ -35,12 +61,6 @@ const Response = lazy(() =>
 export const Route = createFileRoute('/')({
   component: ChatPage,
 })
-
-type UIMessage = Pick<ChatMessage, 'role' | 'content'> & {
-  id?: string
-  parentId?: string
-  branches?: string[]
-}
 
 type CompletionInfo = {
   model?: string
@@ -81,40 +101,156 @@ const decimalFormatter = new Intl.NumberFormat(undefined, {
 
 function ChatPage() {
   const { model: selectedModel } = useSelectedModel()
-  const [messages, setMessages] = useState<UIMessage[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isStreaming, setIsStreaming] = useState(false)
-  const [messageInfo, setMessageInfo] = useState<Record<number, CompletionInfo>>({})
+  const [messageInfo, setMessageInfo] = useState<Record<string, CompletionInfo>>({})
   const [attachments, setAttachments] = useState<File[]>([])
-  const pendingResponseStart = useRef<Record<number, number>>({})
+
+  // Map of parentId -> selectedChildId. 'root' is the key for root messages.
+  const [selectedBranches, setSelectedBranches] = useState<Record<string, string>>({})
+
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editContent, setEditContent] = useState('')
+  const pendingResponseStart = useRef<Record<string, number>>({})
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const canSend = input.trim().length > 0 && !isStreaming
   const hasMessages = messages.length > 0
 
-  const sendPrompt = useCallback(async () => {
-    const prompt = input.trim()
-    if (!prompt || isStreaming) return
+  // Build the tree structure from the flat list of messages
+  const tree = useMemo(() => buildMessageTree(messages), [messages])
 
-    const userMessage: UIMessage = { role: 'user', content: prompt }
-    const conversation = [...messages, userMessage]
-    const assistantIndex = conversation.length
+  // Determine the active leaf based on selected branches
+  const activeLeafId = useMemo(() => getActiveLeaf(tree, selectedBranches), [tree, selectedBranches])
 
-    setMessages([...conversation, { role: 'assistant', content: '' }])
-    setInput('')
-    setAttachments([])
+  // Get the full path from root to the active leaf
+  const activePath = useMemo(() => getMessagePath(tree, activeLeafId), [tree, activeLeafId])
+
+  type SendPromptOptions = {
+    mode?: 'standard' | 'assistant-regenerate' | 'user-regenerate'
+    sourceIndex?: number
+    promptOverride?: string
+  }
+
+  const sendPrompt = useCallback(async (options?: SendPromptOptions) => {
+    const mode = options?.mode ?? 'standard'
+    const prompt = (options?.promptOverride ?? input).trim()
+    if ((!prompt && mode !== 'assistant-regenerate') || isStreaming) return
+
+    let parentId: string | undefined
+    let currentMessages = [...messages]
+
+    // Determine insertion point
+    if (mode === 'assistant-regenerate') {
+      const targetAssistant = typeof options?.sourceIndex === 'number' ? activePath[options.sourceIndex] : undefined
+      if (!targetAssistant || targetAssistant.role !== 'assistant') return
+      parentId = targetAssistant.parentId
+    } else if (mode === 'user-regenerate') {
+      const sourceUser = typeof options?.sourceIndex === 'number' ? activePath[options.sourceIndex] : undefined
+      if (!sourceUser || sourceUser.role !== 'user') return
+      parentId = sourceUser.parentId
+    } else {
+      // Standard: append to active leaf
+      parentId = activeLeafId
+    }
+
+    // Create User Message (if not assistant-regenerate)
+    if (mode !== 'assistant-regenerate') {
+      const userMessage: ChatMessage = {
+        role: 'user',
+        content: prompt,
+        id: generateMessageId(),
+        parentId,
+        children: [],
+        createdAt: Date.now()
+      }
+
+      // Update parent to include this child
+      if (parentId) {
+        currentMessages = currentMessages.map(m =>
+          m.id === parentId
+            ? { ...m, children: [...m.children, userMessage.id] }
+            : m
+        )
+        // Auto-select this new branch
+        setSelectedBranches(prev => ({ ...prev, [parentId!]: userMessage.id }))
+      } else {
+        // Root
+        setSelectedBranches(prev => ({ ...prev, 'root': userMessage.id }))
+      }
+
+      currentMessages.push(userMessage)
+      parentId = userMessage.id // Next message (assistant) will be child of this user message
+    }
+
+    // Create Assistant Message
+    const assistantMessage: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      id: generateMessageId(),
+      parentId,
+      children: [],
+      createdAt: Date.now()
+    }
+
+    // Update parent (User message or previous User message)
+    if (parentId) {
+      currentMessages = currentMessages.map(m =>
+        m.id === parentId
+          ? { ...m, children: [...m.children, assistantMessage.id] }
+          : m
+      )
+      // Auto-select this new assistant branch
+      setSelectedBranches(prev => ({ ...prev, [parentId!]: assistantMessage.id }))
+    }
+
+    currentMessages.push(assistantMessage)
+    setMessages(currentMessages)
+
+    if (mode === 'standard') {
+      setInput('')
+      setAttachments([])
+    }
+
     setError(null)
     setIsStreaming(true)
+
+    const assistantId = assistantMessage.id
     setMessageInfo((previous) => {
       const next = { ...previous }
-      delete next[assistantIndex]
+      delete next[assistantId]
       return next
     })
-    pendingResponseStart.current[assistantIndex] = performance.now()
+    pendingResponseStart.current[assistantId] = performance.now()
 
     const controller = new AbortController()
     abortControllerRef.current = controller
+
+    // Prepare conversation history for the API
+    // We need the path up to the new assistant message (excluding the empty assistant message itself for now, or including it?)
+    // Usually APIs expect the history including the user prompt.
+    // The 'activePath' won't update immediately in this callback scope, so we construct it manually or wait for effect.
+    // But we need to send request NOW.
+
+    // Reconstruct path for the API request
+    // We can use the 'parentId' chain we just built.
+    const conversationForApi: ChatMessage[] = []
+    let curr: string | undefined = assistantMessage.parentId
+    while (curr) {
+      const msg = currentMessages.find(m => m.id === curr)
+      if (msg) {
+        conversationForApi.unshift(msg)
+        curr = msg.parentId
+      } else {
+        break
+      }
+    }
+    // Add the empty assistant message if needed? Usually not for the prompt.
+    // But if we are regenerating, we might need context.
+    // Ollama expects messages: [{role, content}].
 
     try {
       const response = await fetch(`${API_BASE_URL}/chat`, {
@@ -126,7 +262,7 @@ function ChatPage() {
         },
         body: JSON.stringify({
           model: selectedModel,
-          messages: conversation,
+          messages: conversationForApi.map(m => ({ role: m.role, content: m.content })),
         }),
         signal: controller.signal,
       })
@@ -143,24 +279,18 @@ function ChatPage() {
         response.body,
         (delta) => {
           setMessages((previous) => {
-            const next = [...previous]
-            const candidate = next[assistantIndex]
-
-            if (candidate) {
-              next[assistantIndex] = {
-                ...candidate,
-                content: candidate.content + delta,
-              }
-            }
-
-            return next
+            return previous.map(m =>
+              m.id === assistantId
+                ? { ...m, content: m.content + delta }
+                : m
+            )
           })
         },
         (message) => {
           setError(message)
         },
         (metadata: StreamEventPayload) => {
-          const startedAt = pendingResponseStart.current[assistantIndex]
+          const startedAt = pendingResponseStart.current[assistantId]
           const responseTimeMs =
             typeof startedAt === 'number' ? performance.now() - startedAt : undefined
           const evalSeconds =
@@ -174,7 +304,7 @@ function ChatPage() {
 
           setMessageInfo((previous) => ({
             ...previous,
-            [assistantIndex]: {
+            [assistantId]: {
               model: metadata.model,
               doneReason: metadata.done_reason,
               totalDuration: metadata.total_duration,
@@ -187,7 +317,7 @@ function ChatPage() {
               tokensPerSecond,
             },
           }))
-          delete pendingResponseStart.current[assistantIndex]
+          delete pendingResponseStart.current[assistantId]
         },
       )
     } catch (exception) {
@@ -201,9 +331,114 @@ function ChatPage() {
     } finally {
       abortControllerRef.current = null
       setIsStreaming(false)
-      delete pendingResponseStart.current[assistantIndex]
+      delete pendingResponseStart.current[assistantId]
     }
-  }, [input, isStreaming, messages, selectedModel])
+  }, [input, isStreaming, messages, selectedModel, activePath, activeLeafId])
+
+  const regenerateResponse = useCallback((atIndex: number) => {
+    if (isStreaming || atIndex < 0 || atIndex >= activePath.length) return
+
+    const currentMessage = activePath[atIndex]
+    if (!currentMessage) return
+
+    if (currentMessage.role === 'assistant') {
+      void sendPrompt({
+        mode: 'assistant-regenerate',
+        sourceIndex: atIndex,
+      })
+      return
+    }
+  }, [isStreaming, activePath, sendPrompt])
+
+  const copyMessage = useCallback((index: number, content: string) => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopiedIndex(index)
+      setTimeout(() => setCopiedIndex(null), 2000)
+    })
+  }, [])
+
+  const deleteMessage = useCallback((index: number) => {
+    const messageToDelete = activePath[index]
+    if (!messageToDelete) return
+
+    // Delete the node and all its children from 'messages'.
+    const idsToDelete = new Set<string>()
+    const collectIds = (id: string) => {
+      idsToDelete.add(id)
+      messages.filter(m => m.parentId === id).forEach(child => collectIds(child.id))
+    }
+    collectIds(messageToDelete.id)
+
+    setMessages((prev) => {
+      // Also need to remove the deleted ID from its parent's children array
+      const parentId = messageToDelete.parentId
+      let newMessages = prev.filter((m) => !idsToDelete.has(m.id))
+
+      if (parentId) {
+        newMessages = newMessages.map(m =>
+          m.id === parentId
+            ? { ...m, children: m.children.filter(childId => childId !== messageToDelete.id) }
+            : m
+        )
+      }
+      return newMessages
+    })
+  }, [activePath, messages])
+
+  const startEditMessage = useCallback((index: number, content: string) => {
+    setEditingIndex(index)
+    setEditContent(content)
+  }, [])
+
+  const saveEditMessage = useCallback((index: number) => {
+    if (!editContent.trim()) return
+
+    const messageToUpdate = activePath[index]
+    if (!messageToUpdate) return
+
+    setMessages((prev) => prev.map(m =>
+      m.id === messageToUpdate.id
+        ? { ...m, content: editContent }
+        : m
+    ))
+    setEditingIndex(null)
+    setEditContent('')
+  }, [editContent, activePath])
+
+  const submitEditMessage = useCallback((index: number) => {
+    if (!editContent.trim()) return
+
+    void sendPrompt({
+      mode: 'user-regenerate',
+      sourceIndex: index,
+      promptOverride: editContent
+    })
+
+    setEditingIndex(null)
+    setEditContent('')
+  }, [editContent, sendPrompt])
+
+  const cancelEdit = useCallback(() => {
+    setEditingIndex(null)
+    setEditContent('')
+  }, [])
+
+  const navigateBranch = useCallback((message: ChatMessage, direction: 'prev' | 'next') => {
+    const siblings = getSiblings(tree, message.id)
+    if (siblings.length <= 1) return
+
+    const currentIndex = siblings.findIndex(m => m.id === message.id)
+    if (currentIndex === -1) return
+
+    const nextIndex = direction === 'next'
+      ? (currentIndex + 1) % siblings.length
+      : (currentIndex - 1 + siblings.length) % siblings.length
+
+    const nextMessage = siblings[nextIndex]
+    const parentId = nextMessage.parentId ?? 'root'
+
+    setSelectedBranches(prev => ({ ...prev, [parentId]: nextMessage.id }))
+  }, [tree])
 
   const stopStreaming = useCallback(() => {
     abortControllerRef.current?.abort()
@@ -278,43 +513,178 @@ function ChatPage() {
         <Card className="flex shadow-none flex-1 flex-col border-0 backdrop-blur bg-transparent overflow-hidden">
           <CardContent className="flex flex-1 flex-col gap-4">
             <ScrollArea className="flex-1 rounded-2xl overflow-auto pb-40">
-              <div className="flex min-h-80 flex-col gap-3">
+              <div className="flex min-h-80 flex-col gap-3 p-4">
                 {hasMessages ? (
-                  messages.map((message, index) => (
-                    <article
-                      key={`${message.role}-${index}`}
-                      className={
-                        message.role === 'user'
-                          ? 'ml-auto max-w-[85%] rounded-2xl bg-primary px-4 py-3 text-primary-foreground shadow'
-                          : 'mr-auto max-w-[85%] rounded-2xl bg-secondary px-4 py-3 text-secondary-foreground shadow'
-                      }
-                    >
-                      <div className="mb-1 flex items-start justify-between gap-3">
-                        <p className="text-xs uppercase tracking-widest text-muted-foreground">
-                          {message.role}
-                        </p>
-                        {message.role === 'assistant' && messageInfo[index] && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                className="inline-flex size-6 items-center justify-center rounded-full bg-background/60 text-foreground/70 transition hover:bg-background hover:text-foreground"
-                                aria-label="View response details"
-                              >
-                                <Info className="size-3.5" />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent align="end" className="max-w-xs">
-                              <ResponseDetails info={messageInfo[index]} />
-                            </TooltipContent>
-                          </Tooltip>
+                  activePath.map((message, index) => {
+                    const siblings = getSiblings(tree, message.id)
+                    const hasBranches = siblings.length > 1
+                    const currentBranchIndex = siblings.findIndex(m => m.id === message.id)
+                    const isEditing = editingIndex === index
+
+                    return (
+                      <article
+                        key={message.id}
+                        className={cn(
+                          'relative rounded-2xl px-4 py-3 shadow transition-all',
+                          message.role === 'user'
+                            ? 'ml-auto max-w-[85%] bg-primary text-primary-foreground'
+                            : 'mr-auto max-w-[85%] bg-secondary text-secondary-foreground'
                         )}
-                      </div>
-                      <Suspense fallback={<div className="animate-pulse text-sm text-muted-foreground">Loading...</div>}>
-                        <Response>{message.content}</Response>
-                      </Suspense>
-                    </article>
-                  ))
+                      >
+                        <div className="mb-1 flex items-start justify-between gap-3">
+                          <p className="text-xs uppercase tracking-widest text-muted-foreground">
+                            {message.role}
+                          </p>
+                        </div>
+
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <textarea
+                              value={editContent}
+                              onChange={(e) => setEditContent(e.target.value)}
+                              className="w-full min-h-20 p-2 rounded bg-background/50 text-foreground"
+                              autoFocus
+                            />
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => submitEditMessage(index)}>
+                                Save & Submit
+                              </Button>
+                              <Button size="sm" variant="secondary" onClick={() => saveEditMessage(index)}>
+                                Save Only
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={cancelEdit}>
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : hasBranches ? (
+                          <Branch
+                            defaultBranch={currentBranchIndex}
+                            onBranchChange={(branchIndex) => {
+                              const target = siblings[branchIndex]
+                              if (target) {
+                                const parentId = target.parentId ?? 'root'
+                                setSelectedBranches(prev => ({ ...prev, [parentId]: target.id }))
+                              }
+                            }}
+                          >
+                            <BranchMessages>
+                              {siblings.map((branch) => (
+                                <Suspense
+                                  key={branch.id}
+                                  fallback={
+                                    <div className="animate-pulse text-sm text-muted-foreground">
+                                      Loading...
+                                    </div>
+                                  }
+                                >
+                                  <Response>{branch.content}</Response>
+                                </Suspense>
+                              ))}
+                            </BranchMessages>
+                            <BranchSelector from={message.role}>
+                              <BranchPrevious />
+                              <BranchPage />
+                              <BranchNext />
+                            </BranchSelector>
+                          </Branch>
+                        ) : (
+                          <Suspense
+                            fallback={
+                              <div className="animate-pulse text-sm text-muted-foreground">
+                                Loading...
+                              </div>
+                            }
+                          >
+                            <Response>{message.content}</Response>
+                          </Suspense>
+                        )}
+
+                        <Actions className="mt-3 flex-wrap">
+                          <div className="flex items-center gap-1">
+                            <Action
+                              tooltip={copiedIndex === index ? 'Copied!' : 'Copy'}
+                              onClick={() => copyMessage(index, message.content)}
+                              variant={copiedIndex === index ? 'secondary' : 'ghost'}
+                            >
+                              <Copy className="size-4" />
+                            </Action>
+                            {message.role === 'user' && (
+                              <Action
+                                tooltip="Edit message"
+                                onClick={() => startEditMessage(index, message.content)}
+                                disabled={isStreaming}
+                              >
+                                <Edit3 className="size-4" />
+                              </Action>
+                            )}
+                            {message.role === 'assistant' && (
+                              <Action tooltip="Text-to-speech" onClick={() => { }}>
+                                <Volume2 className="size-4" />
+                              </Action>
+                            )}
+                          </div>
+
+                          <Separator orientation="vertical" className="h-6 mx-1" />
+
+                          <div className="flex items-center gap-1">
+                            {message.role === 'assistant' && (
+                              <Action
+                                tooltip="Regenerate"
+                                onClick={() => regenerateResponse(index)}
+                                disabled={isStreaming}
+                              >
+                                <RefreshCcw className="size-4" />
+                              </Action>
+                            )}
+                            {hasBranches && (
+                              <>
+                                <Action
+                                  tooltip="Previous response"
+                                  onClick={() => navigateBranch(message, 'prev')}
+                                >
+                                  <ChevronLeft className="size-4" />
+                                </Action>
+                                <span className="text-xs text-muted-foreground px-1">
+                                  {currentBranchIndex + 1} / {siblings.length}
+                                </span>
+                                <Action
+                                  tooltip="Next response"
+                                  onClick={() => navigateBranch(message, 'next')}
+                                >
+                                  <ChevronRight className="size-4" />
+                                </Action>
+                              </>
+                            )}
+                          </div>
+
+                          <Separator orientation="vertical" className="h-6 mx-1" />
+
+                          <div className="flex items-center gap-1">
+                            {message.role === 'assistant' && messageInfo[message.id] && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Action tooltip="View details">
+                                    <Info className="size-4" />
+                                  </Action>
+                                </TooltipTrigger>
+                                <TooltipContent align="end" className="max-w-xs">
+                                  <ResponseDetails info={messageInfo[message.id]} />
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                            <Action
+                              tooltip="Delete"
+                              onClick={() => deleteMessage(index)}
+                              disabled={isStreaming}
+                            >
+                              <Trash2 className="size-4" />
+                            </Action>
+                          </div>
+                        </Actions>
+                      </article>
+                    )
+                  })
                 ) : (
                   <div className="flex flex-1 items-center justify-center text-center text-sm text-muted-foreground">
                     Start the conversation to see streaming responses.
@@ -509,13 +879,16 @@ type SessionAnalytics = {
 }
 
 function computeAnalytics(
-  infoRecord: Record<number, CompletionInfo>,
+  infoRecord: Record<string, CompletionInfo>,
   contextWindow: number | null,
 ): SessionAnalytics {
   const sorted = Object.entries(infoRecord)
-    .map(([index, info]) => ({ index: Number(index), info }))
-    .filter((entry) => Number.isFinite(entry.index))
-    .sort((a, b) => a.index - b.index)
+    .map(([id, info]) => ({ id, info }))
+    .filter((entry) => entry.info)
+  // We can't easily sort by index anymore since we use IDs. 
+  // But for analytics, maybe order doesn't matter as much, or we can rely on insertion order if JS object preserves it (mostly yes).
+  // Or we could add a timestamp to CompletionInfo.
+  // For now, let's just use the values.
 
   const lastEntry = sorted.length > 0 ? sorted[sorted.length - 1] : undefined
   const lastInfo = lastEntry?.info
