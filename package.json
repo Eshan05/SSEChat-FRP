@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
     "build": "pnpm --recursive build",
-    "clean": "pnpm --recursive exec rm -rf node_modules dist"
+    "clean": "pnpm --recursive exec rm -rf node_modules dist",
+    "start": "pnpm --parallel --filter \"./apps/*\" start"
   },
   "keywords": [],
   "author": "",

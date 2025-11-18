@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import ollamaRoutes from './src/routes/ollama.ts';
+import ollamaRoutesV1 from './src/routes/v1/ollama.ts';
+import ollamaRoutesV2 from './src/routes/v2/ollama.ts';
 
 async function main() {
   const fastify = Fastify({
@@ -16,11 +17,15 @@ async function main() {
   });
 
   await fastify.register(cors, {
-    origin: ['http://localhost:3000', 'http://localhost:5173'],
+    origin: ['http://localhost:3000', 'http://localhost:4173'],
     credentials: true,
   });
 
-  await fastify.register(ollamaRoutes, { prefix: '/api' });
+  await fastify.register(ollamaRoutesV1, { prefix: '/api/v1' });
+
+  await fastify.register(ollamaRoutesV2, { prefix: '/api/v2' });
+
+  await fastify.register(ollamaRoutesV2, { prefix: '/api' });
 
   fastify.get('/health', async () => ({ status: 'ok' }));
 

@@ -229,7 +229,7 @@ function ChatPage() {
         break
       }
     }
-    
+
     if (systemPrompt.trim()) {
       conversationForApi.unshift({
         role: 'system',
@@ -253,10 +253,10 @@ function ChatPage() {
         },
         body: JSON.stringify({
           model: selectedModel,
-          messages: conversationForApi.map(m => ({ 
-            role: m.role, 
+          messages: conversationForApi.map(m => ({
+            role: m.role,
             content: m.content,
-            images: m.images 
+            images: m.images
           })),
           options: {
             temperature,
