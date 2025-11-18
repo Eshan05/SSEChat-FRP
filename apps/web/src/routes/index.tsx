@@ -480,14 +480,14 @@ function ChatPage() {
 
   const handleShowContext = useCallback(() => {
     const currentInput = input.trim()
-    
+
     // Construct the context that would be sent
     const contextMessages = activePath.map(m => ({ role: m.role, content: m.content }))
-    
+
     if (currentInput) {
       contextMessages.push({ role: 'user', content: currentInput })
     }
-    
+
     setContextPreviewData(contextMessages)
     setContextPreviewOpen(true)
   }, [activePath, input])

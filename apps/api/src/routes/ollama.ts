@@ -87,7 +87,7 @@ const ollamaRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { model, messages } = parseResult.data;
-    
+
     // Log the messages being sent to Ollama
     fastify.log.info({ model, messageCount: messages.length, messages }, 'Sending chat request to Ollama');
 
