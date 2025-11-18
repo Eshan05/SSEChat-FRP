@@ -10,7 +10,7 @@ import {
 
 export function ContextPreview({ data }: { data: any[] }) {
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="h-full overflow-y-auto">
       <CodeBlock
         data={[{
           language: 'json',
@@ -18,13 +18,13 @@ export function ContextPreview({ data }: { data: any[] }) {
           code: JSON.stringify(data, null, 2)
         }]}
         defaultValue="json"
-        className="h-full"
+        className="h-full overflow-auto no-scrollbar"
       >
         <CodeBlockHeader>
           <CodeBlockFilename>context.json</CodeBlockFilename>
           <CodeBlockCopyButton />
         </CodeBlockHeader>
-        <CodeBlockBody>
+        <CodeBlockBody className=''>
           {(item) => (
             <CodeBlockItem
               key={item.language}

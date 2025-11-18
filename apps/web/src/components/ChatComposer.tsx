@@ -8,6 +8,7 @@ import {
   Paperclip,
   Plus,
   Search,
+  Settings,
   Sparkles,
   StopCircle,
   Wand2,
@@ -35,6 +36,8 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import CapabilityIcons from '@/components/CapabilityIcons'
@@ -55,6 +58,12 @@ interface ChatComposerProps {
   onAttachmentsChange: (files: File[]) => void
   modelInfo: OllamaModelInfo | null | undefined
   onShowContext?: () => void
+  systemPrompt: string
+  onSystemPromptChange: (value: string) => void
+  temperature: number | undefined
+  onTemperatureChange: (value: number | undefined) => void
+  seed: number | undefined
+  onSeedChange: (value: number | undefined) => void
 }
 
 export function ChatComposer({
@@ -68,6 +77,12 @@ export function ChatComposer({
   onAttachmentsChange,
   modelInfo,
   onShowContext,
+  systemPrompt,
+  onSystemPromptChange,
+  temperature,
+  onTemperatureChange,
+  seed,
+  onSeedChange,
 }: ChatComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [autoMode, setAutoMode] = useState(false)
@@ -205,6 +220,71 @@ export function ChatComposer({
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="h-7 w-7 rounded-full border border-border text-muted-foreground"
+                >
+                  <Settings className="size-3.5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-4" align="start">
+                <div className="grid gap-4">
+                  <div className="space-y-2">
+                    <h4 className="font-medium leading-none">Chat Settings</h4>
+                    <p className="text-sm text-muted-foreground">
+                      Configure model parameters for this session.
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    <div className="grid gap-1">
+                      <Label htmlFor="systemPrompt">System Prompt</Label>
+                      <Textarea
+                        id="systemPrompt"
+                        value={systemPrompt}
+                        onChange={(e) => onSystemPromptChange(e.target.value)}
+                        placeholder="You are a helpful assistant..."
+                        className="h-20 resize-none"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-1">
+                        <Label htmlFor="temperature">Temperature</Label>
+                        <Input
+                          id="temperature"
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="2"
+                          value={temperature ?? ''}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value)
+                            onTemperatureChange(isNaN(val) ? undefined : val)
+                          }}
+                          placeholder="0.7"
+                        />
+                      </div>
+                      <div className="grid gap-1">
+                        <Label htmlFor="seed">Seed</Label>
+                        <Input
+                          id="seed"
+                          type="number"
+                          value={seed ?? ''}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value)
+                            onSeedChange(isNaN(val) ? undefined : val)
+                          }}
+                          placeholder="Random"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
 
             <Button
               type="button"

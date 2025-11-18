@@ -86,7 +86,7 @@ const ollamaRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(400).send({ error: parseResult.error.flatten() });
     }
 
-    const { model, messages } = parseResult.data;
+    const { model, messages, options } = parseResult.data;
 
     // Log the messages being sent to Ollama
     fastify.log.info({ model, messageCount: messages.length, messages }, 'Sending chat request to Ollama');
@@ -111,7 +111,7 @@ const ollamaRoutes: FastifyPluginAsync = async (fastify) => {
           const response = await axios({
             method: 'POST',
             url: `${OLLAMA_BASE}/api/chat`,
-            data: { model, messages, stream: true },
+            data: { model, messages, options, stream: true },
             responseType: 'stream',
             signal: upstreamAbort.signal,
           });

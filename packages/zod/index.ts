@@ -7,6 +7,7 @@ export const ChatMessage = z.object({
   parentId: z.string().nullable().optional(),
   children: z.array(z.string()).default([]),
   createdAt: z.number().optional(),
+  images: z.array(z.string()).optional(),
 });
 
 export type ChatMessage = z.infer<typeof ChatMessage>;
@@ -28,9 +29,17 @@ export const ChatRequestMessage = z.object({
 
 export type ChatRequestMessage = z.infer<typeof ChatRequestMessage>;
 
+export const ChatRequestOptions = z.object({
+  temperature: z.number().optional(),
+  seed: z.number().optional(),
+}).catchall(z.unknown());
+
+export type ChatRequestOptions = z.infer<typeof ChatRequestOptions>;
+
 export const ChatRequest = z.object({
   model: z.string(),
   messages: z.array(ChatRequestMessage),
+  options: ChatRequestOptions.optional(),
 });
 
 export type ChatRequest = z.infer<typeof ChatRequest>;

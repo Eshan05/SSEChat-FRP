@@ -35,7 +35,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Actions, Action } from '@/components/ui/shadcn-io/ai/actions'
 import { API_BASE_URL, consumeEventStream, readErrorMessage } from '@/lib/api'
 import { fetchModelInfo } from '@/lib/ollama'
-import { cn, parseMessageContent } from '@/lib/utils'
+import { cn, parseMessageContent, fileToBase64 } from '@/lib/utils'
 import {
   buildMessageTree,
   getActiveLeaf,
@@ -82,6 +82,9 @@ function ChatPage() {
   const [isStreaming, setIsStreaming] = useState(false)
   const [messageInfo, setMessageInfo] = useState<Record<string, CompletionInfo>>({})
   const [attachments, setAttachments] = useState<File[]>([])
+  const [systemPrompt, setSystemPrompt] = useState('')
+  const [temperature, setTemperature] = useState<number | undefined>(undefined)
+  const [seed, setSeed] = useState<number | undefined>(undefined)
 
   // Map of parentId -> selectedChildId. 'root' is the key for root messages.
   const [selectedBranches, setSelectedBranches] = useState<Record<string, string>>({})
@@ -134,13 +137,16 @@ function ChatPage() {
 
     // Create User Message (if not assistant-regenerate)
     if (mode !== 'assistant-regenerate') {
+      const images = await Promise.all(attachments.map(fileToBase64))
+
       const userMessage: ChatMessage = {
         role: 'user',
         content: prompt,
         id: generateMessageId(),
         parentId,
         children: [],
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        images: images.length > 0 ? images : undefined,
       }
 
       // Update parent to include this child
@@ -223,6 +229,16 @@ function ChatPage() {
         break
       }
     }
+    
+    if (systemPrompt.trim()) {
+      conversationForApi.unshift({
+        role: 'system',
+        content: systemPrompt,
+        id: 'system',
+        children: [],
+      })
+    }
+
     // Add the empty assistant message if needed? Usually not for the prompt.
     // But if we are regenerating, we might need context.
     // Ollama expects messages: [{role, content}].
@@ -237,7 +253,15 @@ function ChatPage() {
         },
         body: JSON.stringify({
           model: selectedModel,
-          messages: conversationForApi.map(m => ({ role: m.role, content: m.content })),
+          messages: conversationForApi.map(m => ({ 
+            role: m.role, 
+            content: m.content,
+            images: m.images 
+          })),
+          options: {
+            temperature,
+            seed,
+          },
         }),
         signal: controller.signal,
       })
@@ -761,6 +785,12 @@ function ChatPage() {
               onAttachmentsChange={setAttachments}
               modelInfo={modelInfo}
               onShowContext={handleShowContext}
+              systemPrompt={systemPrompt}
+              onSystemPromptChange={setSystemPrompt}
+              temperature={temperature}
+              onTemperatureChange={setTemperature}
+              seed={seed}
+              onSeedChange={setSeed}
             />
           </div>
         </div>
