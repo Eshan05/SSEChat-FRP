@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -10,6 +10,7 @@ import { ChatComposer } from '@/components/ChatComposer'
 import { useSelectedModel } from '@/components/SelectedModelProvider'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { API_BASE_URL } from '@/lib/api'
@@ -585,178 +586,231 @@ function AnalyticsSummary({ analytics }: { analytics: SessionAnalytics }) {
     totalMessages,
   } = analytics
 
-  const tokensPerSecondDelta =
-    typeof tokensPerSecond === 'number' && tokensPerSecond > 0 &&
-      typeof lastTokensPerSecond === 'number'
-      ? ((lastTokensPerSecond - tokensPerSecond) / tokensPerSecond) * 100
-      : undefined
+  const tokenRateAverage = numericOrNull(tokensPerSecond)
+  const tokenRateLast = numericOrNull(lastTokensPerSecond)
+  const tokenRateProgress = computeProgress(tokenRateAverage ?? tokenRateLast, TOKEN_RATE_TARGET)
+  const tokenRateDelta = describeDelta(tokenRateAverage, tokenRateLast)
 
-  const tokensPerSecondDeltaInfo = resolveDelta(tokensPerSecondDelta)
+  const responseAverage = numericOrNull(averageResponseTimeMs)
+  const responseLast = numericOrNull(lastResponseTimeMs)
+  const responseProgress = computeProgress(responseAverage ?? responseLast, RESPONSE_TARGET_MS)
+  const responseDelta = describeDelta(responseAverage, responseLast, { inverse: true })
 
-  const responseTimeDelta =
-    typeof averageResponseTimeMs === 'number' && averageResponseTimeMs > 0 &&
-      typeof lastResponseTimeMs === 'number'
-      ? ((averageResponseTimeMs - lastResponseTimeMs) / averageResponseTimeMs) * 100
-      : undefined
+  const contextPercentRaw = numericOrNull(contextUsagePercent)
+  const contextPercent = contextPercentRaw != null ? clamp(contextPercentRaw, 0, 100) : null
+  const averageTokensDisplay =
+    typeof averageTokensPerMessage === 'number' && Number.isFinite(averageTokensPerMessage)
+      ? decimalFormatter.format(averageTokensPerMessage)
+      : 'N/A'
 
-  const responseTimeDeltaInfo = resolveDelta(responseTimeDelta)
-
-  const contextUsageValue = contextWindow
-    ? `${formatPercentage(contextUsagePercent)} of ${formatTokens(contextWindow)} window`
-    : 'N/A'
-
-  const contextUsageDetail =
-    typeof contextWindow === 'number' && contextWindow > 0
-      ? `${formatTokens(contextTokens)} / ${formatTokens(contextWindow)} tokens`
-      : undefined
-
-  const metrics: Array<{
-    label: string
-    value: string
-    detail?: string
-    delta?: string
-    deltaType?: 'positive' | 'negative' | 'neutral'
-  }> = [
-      {
-        label: 'Prompt tokens',
-        value: formatTokens(promptTokens),
-        detail: 'Latest user input',
-      },
-      {
-        label: 'Output tokens',
-        value: formatTokens(totalOutputTokens),
-        detail: 'Assistant responses this session',
-      },
-      {
-        label: 'Context tokens',
-        value: formatTokens(contextTokens),
-        detail: 'Current turn prompt + output',
-      },
-      {
-        label: 'Avg tokens / message',
-        value:
-          typeof averageTokensPerMessage === 'number'
-            ? decimalFormatter.format(averageTokensPerMessage)
-            : 'N/A',
-        detail: totalMessages > 0 ? `${totalMessages} turns analyzed` : undefined,
-      },
-      {
-        label: 'Tokens / second (avg)',
-        value:
-          typeof tokensPerSecond === 'number'
-            ? formatRate(tokensPerSecond, 'tok/s')
-            : 'N/A',
-        detail:
-          typeof lastTokensPerSecond === 'number'
-            ? `Last: ${formatRate(lastTokensPerSecond, 'tok/s')}`
-            : undefined,
-      },
-      {
-        label: 'Tokens / second (last)',
-        value:
-          typeof lastTokensPerSecond === 'number'
-            ? formatRate(lastTokensPerSecond, 'tok/s')
-            : 'N/A',
-        detail:
-          typeof tokensPerSecond === 'number'
-            ? `Avg: ${formatRate(tokensPerSecond, 'tok/s')}`
-            : undefined,
-        delta: tokensPerSecondDeltaInfo?.label,
-        deltaType: tokensPerSecondDeltaInfo?.type,
-      },
-      {
-        label: 'Response time (avg)',
-        value:
-          typeof averageResponseTimeMs === 'number'
-            ? formatMilliseconds(averageResponseTimeMs)
-            : 'N/A',
-        detail:
-          typeof lastResponseTimeMs === 'number'
-            ? `Last: ${formatMilliseconds(lastResponseTimeMs)}`
-            : undefined,
-      },
-      {
-        label: 'Response time (last)',
-        value:
-          typeof lastResponseTimeMs === 'number'
-            ? formatMilliseconds(lastResponseTimeMs)
-            : 'N/A',
-        detail:
-          typeof averageResponseTimeMs === 'number'
-            ? `Avg: ${formatMilliseconds(averageResponseTimeMs)}`
-            : undefined,
-        delta: responseTimeDeltaInfo?.label,
-        deltaType: responseTimeDeltaInfo?.type,
-      },
-      {
-        label: 'Context usage',
-        value: contextUsageValue,
-        detail: contextUsageDetail,
-      },
-    ]
+  const contextLimit = typeof contextWindow === 'number' && contextWindow > 0 ? contextWindow : null
 
   return (
-    <div className="rounded-2xl border border-border/60 bg-card/70 p-1 shadow-sm">
-      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-[1.4rem] bg-border sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {metrics.map((metric, index) => (
-          <Card
-            key={metric.label}
-            className={cn(
-              'rounded-none border-0 bg-background/90 shadow-none backdrop-blur-sm transition-colors hover:bg-background',
-              index === 0 && 'sm:rounded-tl-[1.4rem]',
-              index === 1 && 'sm:rounded-tr-[1.4rem] lg:rounded-tr-none',
-            )}
-          >
-            <CardContent className="flex h-full flex-col gap-3 p-4 sm:p-5">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
-                  {metric.label}
-                </p>
-                {metric.delta && (
-                  <span
-                    className={cn(
-                      'text-xs font-medium uppercase tracking-tight',
-                      metric.deltaType === 'positive' && 'text-emerald-500',
-                      metric.deltaType === 'negative' && 'text-red-500',
-                      metric.deltaType === 'neutral' && 'text-muted-foreground',
-                    )}
-                  >
-                    {metric.delta}
+    <div className="overflow-hidden rounded-3xl border border-border/60 bg-muted/40">
+      <div className="grid grid-cols-1 gap-px bg-border/60 sm:grid-cols-2 lg:grid-cols-4">
+        <StatTile className="lg:col-span-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">Token throughput</span>
+            <span className="text-xs uppercase tracking-wide text-muted-foreground"></span>
+          </div>
+          <div className="text-2xl font-semibold text-foreground">
+            {tokenRateAverage != null ? formatRate(tokenRateAverage, 'tok/s') : 'N/A'}
+          </div>
+          <Progress value={tokenRateProgress} className="h-1.5 bg-muted" />
+          <div className="flex items-center justify-between text-xs -mt-1 uppercase tracking-wide text-muted-foreground">
+            <span>0</span>
+            <span>200</span>
+          </div>
+          <div className="mt-2 space-y-1 text-xs">
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Average</span>
+              <span className="text-foreground">
+                {tokenRateAverage != null ? formatRate(tokenRateAverage, 'tok/s') : 'N/A'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span className="flex items-center gap-2">
+                Last
+                {tokenRateDelta && (
+                  <span className={cn('font-medium', deltaVariantClass(tokenRateDelta.variant))}>
+                    {tokenRateDelta.label}
                   </span>
                 )}
-              </div>
-              <div className="text-2xl font-semibold tracking-tight text-foreground">
-                {metric.value}
-              </div>
-              {metric.detail && (
-                <p className="text-xs text-muted-foreground">{metric.detail}</p>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+              </span>
+              <span className="text-foreground">
+                {tokenRateLast != null ? formatRate(tokenRateLast, 'tok/s') : 'N/A'}
+              </span>
+            </div>
+          </div>
+        </StatTile>
+
+        <StatTile className="lg:col-span-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">Response latency</span>
+            <span className="text-xs uppercase tracking-wide text-muted-foreground"></span>
+          </div>
+          <div className="text-2xl font-semibold text-foreground">
+            {responseAverage != null ? formatMilliseconds(responseAverage) : 'N/A'}
+          </div>
+          <Progress value={responseProgress} className="h-1.5 bg-muted" />
+          <div className="flex items-center justify-between -mt-1 text-xs uppercase tracking-wide text-muted-foreground">
+            <span>0</span>
+            <span>{formatMilliseconds(RESPONSE_TARGET_MS)}</span>
+          </div>
+          <div className="mt-2 space-y-1 text-xs">
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Average</span>
+              <span className="text-foreground">
+                {responseAverage != null ? formatMilliseconds(responseAverage) : 'N/A'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span className="flex items-center gap-2">
+                Last
+                {responseDelta && (
+                  <span className={cn('font-medium', deltaVariantClass(responseDelta.variant))}>
+                    {responseDelta.label}
+                  </span>
+                )}
+              </span>
+              <span className="text-foreground">
+                {responseLast != null ? formatMilliseconds(responseLast) : 'N/A'}
+              </span>
+            </div>
+          </div>
+        </StatTile>
+
+        <StatTile>
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">Prompt tokens</span>
+          <span className="text-xs text-muted-foreground -mt-2">
+            Average tokens / M:{' '}
+            <span className="text-foreground">{averageTokensDisplay}</span>
+          </span>
+          <span className="text-2xl font-semibold text-foreground">{formatTokens(promptTokens)}</span>
+        </StatTile>
+
+        <StatTile>
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">Output tokens</span>
+          <span className="text-xs text-muted-foreground -mt-2">
+            Total turns:{' '}
+            <span className="text-foreground">{totalMessages}</span>
+          </span>
+          <span className="text-2xl font-semibold text-foreground">{formatTokens(totalOutputTokens)}</span>
+        </StatTile>
+
+        <StatTile className="lg:col-span-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">Context usage</span>
+            <span className="text-xs font-medium text-muted-foreground">
+              {contextPercent != null ? formatPercentage(contextPercent) : 'N/A'}
+            </span>
+          </div>
+          <div className="text-2xl font-semibold text-foreground">
+            {contextPercent != null ? formatPercentage(contextPercent) : 'N/A'}
+          </div>
+          <Progress value={contextPercent ?? 0} className="h-1.5 bg-muted" />
+          <div className="flex items-center justify-between text-xs uppercase tracking-wide text-muted-foreground -mt-1">
+            <span>0 tokens</span>
+            <span>
+              {contextLimit ? `${formatTokens(contextLimit)} limit` : 'Window unknown'}
+            </span>
+          </div>
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            <div className="flex items-center justify-between">
+              <span>Context Tokens / Max</span>
+              <span className="text-foreground">
+                {contextLimit ? `${formatTokens(contextTokens)} / ${formatTokens(contextLimit)}` : formatTokens(contextTokens)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Prompt</span>
+              <span className="text-foreground">{formatTokens(promptTokens)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Output</span>
+              <span className="text-foreground">{formatTokens(totalOutputTokens)}</span>
+            </div>
+          </div>
+        </StatTile>
       </div>
     </div>
   )
 }
 
-type DeltaInfo = { label: string; type: 'positive' | 'negative' | 'neutral' }
+const TOKEN_RATE_TARGET = 200
+const RESPONSE_TARGET_MS = 2000
 
-function resolveDelta(value?: number): DeltaInfo | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return undefined
+type DeltaVariant = 'positive' | 'negative' | 'neutral'
+
+function describeDelta(
+  baseline: number | null,
+  comparison: number | null,
+  options: { inverse?: boolean } = {},
+): { label: string; variant: DeltaVariant } | null {
+  const { inverse = false } = options
+  if (
+    baseline == null ||
+    comparison == null ||
+    !Number.isFinite(baseline) ||
+    !Number.isFinite(comparison) ||
+    baseline === 0
+  ) {
+    return null
   }
 
-  const absValue = Math.abs(value)
-  if (absValue < 0.1) {
-    return { label: 'Δ 0%', type: 'neutral' }
+  const delta = comparison - baseline
+  const percent = (delta / baseline) * 100
+
+  if (!Number.isFinite(percent)) {
+    return null
   }
 
-  const formatted = absValue >= 10 ? absValue.toFixed(0) : absValue.toFixed(1)
-  const prefix = value > 0 ? '+' : '-'
-  return {
-    label: `Δ ${prefix}${formatted}%`,
-    type: value > 0 ? 'positive' : 'negative',
+  const arrow = delta === 0 ? '→' : delta > 0 ? '↑' : '↓'
+  const formattedPercent = Math.abs(percent) >= 10 ? percent.toFixed(1) : percent.toFixed(2)
+  const label = `${arrow} ${delta > 0 ? '+' : ''}${formattedPercent}%`
+  let variant: DeltaVariant = 'neutral'
+
+  if (delta !== 0) {
+    const improvement = inverse ? delta <= 0 : delta >= 0
+    variant = improvement ? 'positive' : 'negative'
   }
+
+  return { label, variant }
+}
+
+function deltaVariantClass(variant: DeltaVariant) {
+  switch (variant) {
+    case 'positive':
+      return 'text-emerald-500'
+    case 'negative':
+      return 'text-red-500'
+    default:
+      return 'text-muted-foreground'
+  }
+}
+
+function StatTile({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <div className={cn('flex flex-col gap-3 bg-background/90 p-4 sm:p-6', className)}>
+      {children}
+    </div>
+  )
+}
+
+function numericOrNull(value?: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function computeProgress(value: number | null, target: number) {
+  if (value == null || !Number.isFinite(value) || target <= 0) {
+    return 0
+  }
+
+  return clamp((value / target) * 100, 0, 100)
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
 }
 
 async function readErrorMessage(response: Response) {
