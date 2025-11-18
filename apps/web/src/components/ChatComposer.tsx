@@ -145,8 +145,9 @@ export function ChatComposer({
                 target.style.height = `${target.scrollHeight}px`
               }}
               placeholder={canAttach ? 'Ask anything or drop a file' : 'Ask anything'}
-              className="w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+              className="w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 max-h-20 scrollbar-none overflow-y-auto"
               rows={1}
+
             />
           </form>
         </div>
@@ -171,7 +172,7 @@ export function ChatComposer({
           </div>
         )}
 
-        <div className="flex items-center justify-between px-3 pb-3 pt-2">
+        <section className="flex items-center justify-between px-3 pt-2">
           <div className="flex items-center gap-1.5">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -215,6 +216,10 @@ export function ChatComposer({
               <Wand2 className="size-3.5" />
               Auto
             </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground"></span>
+              <CapabilityIcons capabilities={modelInfo?.capabilities ?? []} />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -239,97 +244,87 @@ export function ChatComposer({
               {isStreaming ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
             </Button>
           </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 px-1 flex-wrap">
-        <Popover open={isModelPickerOpen} onOpenChange={setIsModelPickerOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 rounded-full border border-border/60 px-3 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <Search className="size-3.5" />
-              {selectedModel ? <ModelName modelId={selectedModel} showIcon={true} className="text-xs" /> : 'Select model'}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-72 p-0" align="start">
-            <Command>
-              <CommandInput placeholder="Search models" />
-              <CommandList>
-                <CommandEmpty>No models found.</CommandEmpty>
-                <CommandGroup heading="Available models">
-                  {modelsLoading && (
-                    <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
-                      <Loader2 className="size-3 animate-spin" />
-                      Loading models…
-                    </div>
-                  )}
-                  {models?.map((model) => (
-                    <CommandItem
-                      key={model.name}
-                      value={model.name}
-                      onSelect={handleCommandSelect}
-                      className="flex flex-col items-start gap-0.5"
-                    >
-                      <div className="flex w-full items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <ModelName modelId={model.name} showIcon={false} />
-                        </div>
-                        {model.name === selectedModel && <Check className="size-4" />}
+        </section>
+        <section className="flex items-center gap-2 pb-3 flex-wrap px-3">
+          <Popover open={isModelPickerOpen} onOpenChange={setIsModelPickerOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 rounded-full border border-border/60 px-3 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <Search className="size-3.5" />
+                {selectedModel ? <ModelName modelId={selectedModel} showIcon={true} className="text-xs" /> : 'Select model'}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search models" />
+                <CommandList>
+                  <CommandEmpty>No models found.</CommandEmpty>
+                  <CommandGroup heading="Available models">
+                    {modelsLoading && (
+                      <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
+                        <Loader2 className="size-3 animate-spin" />
+                        Loading models…
                       </div>
-                      <span className="text-xs text-muted-foreground">
-                        {formatModelMetadata(model.size, model.modified_at)}
-                      </span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
+                    )}
+                    {models?.map((model) => (
+                      <CommandItem
+                        key={model.name}
+                        value={model.name}
+                        onSelect={handleCommandSelect}
+                        className="flex flex-col items-start gap-0.5"
+                      >
+                        <div className="flex w-full items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <ModelName modelId={model.name} showIcon={false} />
+                          </div>
+                          {model.name === selectedModel && <Check className="size-4" />}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatModelMetadata(model.size, model.modified_at)}
+                        </span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 rounded-full border border-transparent px-2 text-xs text-muted-foreground"
-            >
-              <Sparkles className="size-3.5" />
-              {autoMode ? 'Auto responses on' : 'Manual control'}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Auto mode will adaptively rewrite prompts.</TooltipContent>
-        </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 rounded-full border border-transparent px-2 text-xs text-muted-foreground"
+              >
+                <Sparkles className="size-3.5" />
+                {autoMode ? 'Auto responses' : 'Manual'}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Auto mode will adaptively rewrite prompts.</TooltipContent>
+          </Tooltip>
 
-        <div className="flex-1" />
+          <div className="flex-1" />
 
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">Vision</span>
-            <span className={cn(canAttach ? 'text-emerald-500' : 'text-muted-foreground', 'text-sm font-medium')}>{canAttach ? 'Enabled' : 'Disabled'}</span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="items-center gap-2 hidden">
+              <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">Context</span>
+              <div className="text-sm font-medium text-foreground">{formatContextLength(modelInfo?.contextLength)}</div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground"></span>
-            <CapabilityIcons capabilities={modelInfo?.capabilities ?? []} />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">Context</span>
-            <div className="text-sm font-medium text-foreground">{formatContextLength(modelInfo?.contextLength)}</div>
-          </div>
-        </div>
-
-        {modelsFetching && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+          {modelsFetching && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+        </section>
       </div>
+
+
     </div>
   )
 }
 
-// CapabilityBadge removed: using CapabilityIcons for visual capability indicators
 
 function formatModelMetadata(size: number, modifiedAt: string) {
   const formattedSize = formatBytes(size)

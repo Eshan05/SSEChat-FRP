@@ -19,7 +19,7 @@ import {
   CredenzaTitle,
   CredenzaBody,
 } from '@/components/ui/credenza'
-import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -223,12 +223,12 @@ function ChatPage() {
   )
 
   return (
-    <main className="flex min-h-screen justify-center bg-muted/30 px-4 py-12">
-      <div className="flex w-full max-w-5xl flex-col gap-8">
-        <section className="relative overflow-hidden rounded-3xl border border-border/60 bg-card/80 px-8 py-10 shadow-xl">
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-            <div className="max-w-xl space-y-3">
-              <div className="flex items-start gap-3">
+    <main className="flex h-screen w-full justify-center bg-muted/30 px-4 my-2">
+      <div className="flex w-full max-w-5xl flex-col gap-6 h-full">
+        <section className="overflow-hidden rounded-xl border border-border/60 bg-card/80 p-4 shadow-xl sticky top-20 z-10 sm:top-20 hidden">
+          <header className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+            <div className="max-w-xl space-y-2">
+              <div className="flex items-center gap-3">
                 <Badge variant="outline" className="rounded-full border-primary/60 bg-primary/10 text-primary">
                   <Sparkles className="size-3.5" />
                   Local AI Powered Chat
@@ -260,45 +260,15 @@ function ChatPage() {
                 </p>
               </div>
             </div>
-
-            <div className="flex shrink-0 flex-col gap-3 text-xs text-muted-foreground">
-              <div className="flex items-center gap-2 rounded-2xl border border-border/60 bg-background/70 px-4 py-3 shadow-sm">
-                <Radio className="size-4 text-primary" />
-                <div className="flex flex-col">
-                  <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
-                    Active model
-                  </span>
-                  <span className="text-sm font-medium text-foreground">
-                    {selectedModel ? <ModelName modelId={selectedModel} showIcon /> : 'Select a model below'}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 rounded-2xl border border-border/60 bg-background/70 px-4 py-3 shadow-sm">
-                <Info className="size-4 text-primary" />
-                <div className="flex flex-col">
-                  <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
-                    Context length
-                  </span>
-                  <span className="text-sm font-medium text-foreground">
-                    {modelInfo?.contextLength
-                      ? new Intl.NumberFormat().format(modelInfo.contextLength)
-                      : 'Awaiting model info'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+          </header>
 
           <div className="pointer-events-none absolute -right-24 top-1/2 hidden h-56 w-56 -translate-y-1/2 rounded-full bg-primary/10 blur-3xl sm:block" />
         </section>
 
-        <Card className="flex flex-1 flex-col border-border/60 bg-card/60 backdrop-blur">
+        <Card className="flex shadow-none flex-1 flex-col border-0 backdrop-blur bg-transparent overflow-hidden">
           <CardContent className="flex flex-1 flex-col gap-4">
-            {analytics.totalMessages > 0 && (
-              <AnalyticsSummary analytics={analytics} />
-            )}
-            <ScrollArea className="flex-1 rounded-2xl border bg-background/40">
-              <div className="flex min-h-80 flex-col gap-3 p-4">
+            <ScrollArea className="flex-1 rounded-2xl overflow-auto pb-36 sm:pb-32">
+              <div className="flex min-h-80 flex-col gap-3 p-4 pb-40">
                 {hasMessages ? (
                   messages.map((message, index) => (
                     <article
@@ -344,7 +314,13 @@ function ChatPage() {
             {error && <p className="text-sm text-destructive">{error}</p>}
           </CardContent>
 
-          <CardFooter className="flex flex-col items-stretch gap-3">
+          {/* Footer intentionally left empty; composer is positioned at fixed bottom */}
+        </Card>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center pointer-events-auto">
+        <div className="w-full max-w-5xl px-4 m-2 sm:px-0">
+          <div className="mx-auto w-full">
             <ChatComposer
               inputValue={input}
               onInputChange={setInput}
@@ -358,8 +334,8 @@ function ChatPage() {
               onAttachmentsChange={setAttachments}
               modelInfo={modelInfo}
             />
-          </CardFooter>
-        </Card>
+          </div>
+        </div>
       </div>
     </main>
   )

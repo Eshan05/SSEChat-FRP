@@ -27,25 +27,6 @@ export default function Header() {
             </div>
           </Link>
           <Separator orientation="vertical" className="hidden h-8 sm:block" />
-          <nav className="hidden items-center gap-1 sm:flex">
-            {navItems.map(({ to, label, icon: Icon }) => (
-              <Button
-                key={to}
-                asChild
-                variant="ghost"
-                size="sm"
-                className="gap-2 rounded-full text-xs font-medium"
-              >
-                <Link
-                  to={to}
-                  activeProps={{ className: 'bg-primary/10 text-primary hover:bg-primary/20' }}
-                >
-                  <Icon className="size-3.5" />
-                  {label}
-                </Link>
-              </Button>
-            ))}
-          </nav>
         </div>
 
         <div className="flex items-center gap-2">
