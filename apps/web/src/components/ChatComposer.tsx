@@ -36,6 +36,8 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import CapabilityIcons from '@/components/CapabilityIcons'
+import ModelName from '@/components/ModelName'
 import { fetchModelInfo, fetchModels, type OllamaModelInfo } from '@/lib/ollama'
 import { useSelectedModel } from '@/components/SelectedModelProvider'
 
@@ -240,7 +242,7 @@ export function ChatComposer({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 px-1">
+      <div className="flex items-center gap-2 px-1 flex-wrap">
         <Popover open={isModelPickerOpen} onOpenChange={setIsModelPickerOpen}>
           <PopoverTrigger asChild>
             <Button
@@ -249,7 +251,7 @@ export function ChatComposer({
               className="h-7 gap-1 rounded-full border border-border/60 px-3 text-xs text-muted-foreground hover:text-foreground"
             >
               <Search className="size-3.5" />
-              {selectedModel || 'Select model'}
+              {selectedModel ? <ModelName modelId={selectedModel} showIcon={true} className="text-xs" /> : 'Select model'}
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-72 p-0" align="start">
@@ -272,7 +274,9 @@ export function ChatComposer({
                       className="flex flex-col items-start gap-0.5"
                     >
                       <div className="flex w-full items-center justify-between">
-                        <span className="text-sm font-medium text-foreground">{model.name}</span>
+                        <div className="flex items-center gap-2">
+                          <ModelName modelId={model.name} showIcon={false} />
+                        </div>
                         {model.name === selectedModel && <Check className="size-4" />}
                       </div>
                       <span className="text-xs text-muted-foreground">
@@ -303,9 +307,20 @@ export function ChatComposer({
         <div className="flex-1" />
 
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <CapabilityBadge label="Vision" active={canAttach} />
-          <CapabilityBadge label="Capabilities" value={modelInfo?.capabilities?.join(', ')} />
-          <CapabilityBadge label="Context" value={formatContextLength(modelInfo?.contextLength)} />
+          <div className="flex items-center gap-2">
+            <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">Vision</span>
+            <span className={cn(canAttach ? 'text-emerald-500' : 'text-muted-foreground', 'text-sm font-medium')}>{canAttach ? 'Enabled' : 'Disabled'}</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground"></span>
+            <CapabilityIcons capabilities={modelInfo?.capabilities ?? []} />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">Context</span>
+            <div className="text-sm font-medium text-foreground">{formatContextLength(modelInfo?.contextLength)}</div>
+          </div>
         </div>
 
         {modelsFetching && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
@@ -314,29 +329,7 @@ export function ChatComposer({
   )
 }
 
-function CapabilityBadge({
-  label,
-  value,
-  active,
-}: {
-  label: string
-  value?: string | number | null
-  active?: boolean
-}) {
-  const displayValue = typeof value === 'string' && value.trim().length > 0 ? value : undefined
-
-  return (
-    <span
-      className={cn(
-        'flex items-center gap-1 rounded-full border border-border/60 px-2 py-1 text-[0.65rem] uppercase tracking-wide',
-        active ? 'text-primary border-primary/40' : 'text-muted-foreground',
-      )}
-    >
-      {label}
-      {displayValue && <span className="normal-case text-muted-foreground/80">{displayValue}</span>}
-    </span>
-  )
-}
+// CapabilityBadge removed: using CapabilityIcons for visual capability indicators
 
 function formatModelMetadata(size: number, modifiedAt: string) {
   const formattedSize = formatBytes(size)

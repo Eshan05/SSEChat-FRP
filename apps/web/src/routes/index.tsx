@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 
 import { Info, Radio, Sparkles } from 'lucide-react'
+import ModelName from '@/components/ModelName'
 import type { ChatMessage } from '@pkg/zod'
 
 import { ChatComposer } from '@/components/ChatComposer'
@@ -239,7 +240,7 @@ function ChatPage() {
                     Active model
                   </span>
                   <span className="text-sm font-medium text-foreground">
-                    {selectedModel || 'Select a model below'}
+                    {selectedModel ? <ModelName modelId={selectedModel} showIcon /> : 'Select a model below'}
                   </span>
                 </div>
               </div>

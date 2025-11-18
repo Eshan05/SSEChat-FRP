@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { RotateCw } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -12,6 +13,8 @@ import {
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import CapabilityIcons from '@/components/CapabilityIcons'
+import ModelName, { getModelMeta } from '@/components/ModelName'
 import { DEFAULT_MODEL } from '@/lib/api'
 import { fetchModelInfo, fetchModels } from '@/lib/ollama'
 import { useSelectedModel } from '@/components/SelectedModelProvider'
@@ -91,12 +94,18 @@ export default function ModelSelector({ className }: { className?: string }) {
           </span>
           <Select value={model} onValueChange={setModel}>
             <SelectTrigger size="sm" className="min-w-48">
-              <SelectValue placeholder="Select a model" />
+              <SelectValue asChild>
+                <div className="flex items-center gap-2">
+                  {model ? <ModelName modelId={model} showIcon={false} /> : <span className="text-sm text-muted-foreground">Select a model</span>}
+                </div>
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {models.map((candidate) => (
                 <SelectItem key={candidate.name} value={candidate.name}>
-                  {candidate.name}
+                  <div className="flex items-center gap-2">
+                    <ModelName modelId={candidate.name} showIcon={false} />
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -137,7 +146,7 @@ export default function ModelSelector({ className }: { className?: string }) {
       {current && (
         <div className="space-y-3 rounded-lg border border-dashed border-border/60 bg-muted/50 px-3 py-3 text-xs text-muted-foreground">
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <InfoCell label="Selected" value={current.name} />
+            <InfoCell label="Selected" value={<ModelName modelId={current.name} />} />
             <InfoCell label="Size" value={formatBytes(current.size)} />
             <InfoCell label="Updated" value={formatDateTime(current.modified_at)} />
             <InfoCell
@@ -147,6 +156,15 @@ export default function ModelSelector({ className }: { className?: string }) {
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <InfoCell label="Provider" value={(() => {
+              const meta = getModelMeta(current.name)
+              return (
+                <div className="flex items-center gap-2">
+                  {meta?.icon}
+                  <span className="text-sm font-medium text-foreground">{meta?.provider ?? 'Local'}</span>
+                </div>
+              )
+            })()} />
             <InfoCell label="Param size" value={modelInfo?.parameterSize ?? 'N/A'} />
             <InfoCell
               label="Quantization"
@@ -154,7 +172,7 @@ export default function ModelSelector({ className }: { className?: string }) {
             />
             <InfoCell
               label="Capabilities"
-              value={formatCapabilities(capabilities)}
+              value={<CapabilityIcons capabilities={capabilities} />}
             />
           </div>
 
@@ -229,7 +247,7 @@ function formatParameterSummary(parameters: Record<string, number | string>) {
   return entries.slice(0, 4).join(', ')
 }
 
-function InfoCell({ label, value }: { label: string; value: string }) {
+function InfoCell({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="uppercase tracking-wide text-[0.65rem] text-muted-foreground/70">
