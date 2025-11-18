@@ -1,13 +1,20 @@
 import type { ComponentProps, HTMLAttributes } from 'react';
-import { isValidElement, memo } from 'react';
+import { isValidElement, lazy, memo, Suspense } from 'react';
 import ReactMarkdown, { type Options } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import { CodeBlock, CodeBlockCopyButton } from './code-block';
 import 'katex/dist/katex.min.css';
 import hardenReactMarkdown from 'harden-react-markdown';
 import { cn } from '@/lib/utils';
+
+// Lazy load heavy syntax highlighter components
+const CodeBlockLazy = lazy(() =>
+  import('./code-block').then((mod) => ({ default: mod.CodeBlock }))
+);
+const CodeBlockCopyButtonLazy = lazy(() =>
+  import('./code-block').then((mod) => ({ default: mod.CodeBlockCopyButton }))
+);
 
 
 /**
@@ -27,7 +34,7 @@ function parseIncompleteMarkdown(text: string): string {
   const linkMatch = result.match(linkImagePattern);
   if (linkMatch) {
     // If we have an unterminated [ or ![, remove it and everything after
-    const startIndex = result.lastIndexOf(linkMatch[1]);
+    const startIndex = result.lastIndexOf(linkMatch[1]!);
     result = result.substring(0, startIndex);
   }
 
@@ -331,16 +338,24 @@ const components: Options['components'] = {
     }
 
     return (
-      <CodeBlock
-        className={cn('my-4 h-auto', className)}
-        code={code}
-        language={language}
+      <Suspense
+        fallback={
+          <div className="my-4 rounded-lg bg-muted p-4">
+            <div className="animate-pulse text-muted-foreground text-sm">Loading code...</div>
+          </div>
+        }
       >
-        <CodeBlockCopyButton
-          onCopy={() => console.log('Copied code to clipboard')}
-          onError={() => console.error('Failed to copy code to clipboard')}
-        />
-      </CodeBlock>
+        <CodeBlockLazy
+          className={cn('my-4 h-auto', className)}
+          code={code}
+          language={language}
+        >
+          <CodeBlockCopyButtonLazy
+            onCopy={() => console.log('Copied code to clipboard')}
+            onError={() => console.error('Failed to copy code to clipboard')}
+          />
+        </CodeBlockLazy>
+      </Suspense>
     );
   },
 };
