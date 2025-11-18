@@ -10,6 +10,15 @@ import type { ChatMessage } from '@pkg/zod'
 import { ChatComposer } from '@/components/ChatComposer'
 import { useSelectedModel } from '@/components/SelectedModelProvider'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Credenza,
+  CredenzaTrigger,
+  CredenzaContent,
+  CredenzaHeader,
+  CredenzaTitle,
+  CredenzaBody,
+} from '@/components/ui/credenza'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -207,6 +216,7 @@ function ChatPage() {
     refetchOnWindowFocus: false,
   })
 
+  const [credenzaOpen, setCredenzaOpen] = useState(false)
   const analytics = useMemo(
     () => computeAnalytics(messageInfo, modelInfo?.contextLength ?? null),
     [messageInfo, modelInfo?.contextLength],
@@ -218,10 +228,29 @@ function ChatPage() {
         <section className="relative overflow-hidden rounded-3xl border border-border/60 bg-card/80 px-8 py-10 shadow-xl">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
             <div className="max-w-xl space-y-3">
-              <Badge variant="outline" className="rounded-full border-primary/60 bg-primary/10 text-primary">
-                <Sparkles className="size-3.5" />
-                Local AI Powered Chat
-              </Badge>
+              <div className="flex items-start gap-3">
+                <Badge variant="outline" className="rounded-full border-primary/60 bg-primary/10 text-primary">
+                  <Sparkles className="size-3.5" />
+                  Local AI Powered Chat
+                </Badge>
+                <div className="flex flex-col items-start">
+                  <Credenza open={credenzaOpen} onOpenChange={setCredenzaOpen}>
+                    <CredenzaTrigger asChild>
+                      <Button variant="ghost" size="icon-sm" aria-label="Session analytics">
+                        <Info className="size-4" />
+                      </Button>
+                    </CredenzaTrigger>
+                    <CredenzaContent className="md:max-w-4/5 lg:max-w-3/5">
+                      <CredenzaHeader>
+                        <CredenzaTitle>Session Analytics</CredenzaTitle>
+                      </CredenzaHeader>
+                      <CredenzaBody className='overflow-y-auto py-6'>
+                        <AnalyticsSummary analytics={analytics} />
+                      </CredenzaBody>
+                    </CredenzaContent>
+                  </Credenza>
+                </div>
+              </div>
               <div className="space-y-0">
                 <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
                   SSE Streaming Chat
